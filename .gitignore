@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+.DS_Store
+
+# tsc 误输出的编译产物（源码目录下不应存在 .js/.d.ts，均由 electron-vite 构建到 out/）
+src/**/*.js
+src/**/*.d.ts
+!src/preload/window.d.ts
+electron.vite.config.js
+electron.vite.config.d.ts

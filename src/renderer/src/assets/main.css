@@ -1,0 +1,9 @@
+@import 'tailwindcss';
+
+/* 全局暗色基调，跟主进程窗口背景色 #0b0b0f 保持一致 */
+body {
+  margin: 0;
+  background-color: #0b0b0f;
+  color: #e5e5e5;
+  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+}
