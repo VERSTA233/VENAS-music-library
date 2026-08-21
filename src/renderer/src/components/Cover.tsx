@@ -29,7 +29,7 @@ export default function Cover({ cacheKey, load, className }: CoverProps): React.
   }, [cacheKey])
 
   return url ? (
-    <img src={url} className={className} alt="" />
+    <img src={url} className={className} alt="" draggable={false} />
   ) : (
     <div className={`${className} bg-white/5`} />
   )

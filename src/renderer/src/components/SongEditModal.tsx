@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { SongDetail } from '../../../shared/types'
+import { Pencil, Trash2, X } from 'lucide-react'
+import type { ReloadFileSelection, SongDetail } from '../../../shared/types'
 import SongForm, { type SongFormValue } from './SongForm'
 import ReloadAudioPanel from './ReloadAudioPanel'
 import { useAlbumSubmitGuard } from './AlbumSubmitGuard'
 import { useNavStore, type NavTarget, type ReturnContext } from '../stores/navStore'
+import { usePlayerStore } from '../stores/playerStore'
 
 interface SongEditModalProps {
   songId: number
@@ -15,7 +17,6 @@ interface SongEditModalProps {
 
 const EMPTY_FORM: SongFormValue = {
   title: '',
-  bpm: '',
   firstHeardDate: '',
   lyric: '',
   lyricFilePath: null,
@@ -26,7 +27,7 @@ const EMPTY_FORM: SongFormValue = {
     releaseDate: '',
     albumType: 'Album',
     totalDiscs: '',
-    label: '',
+    labels: [],
     discNumber: '',
     trackNumber: '',
     artists: [],
@@ -41,31 +42,30 @@ function detailToFormValue(d: SongDetail): SongFormValue {
   const album = d.album
   return {
     title: d.title,
-    bpm: d.bpm != null ? String(d.bpm) : '',
     firstHeardDate: d.first_heard_date ?? '',
     lyric: d.lyric ?? '',
     lyricFilePath: null,
-    artists: d.artists.map((a) => ({ name: a.name, role: a.role, order: a.order })),
+    artists: d.artists.map((a) => ({ name: a.name, role: a.role, order: a.order, type: null })),
     tags: d.tags.map((t) => ({ id: t.id, name: t.name, tag_type: t.tag_type, description: null })),
     album: album
       ? (() => {
           const releaseDate = album.release_date ?? ''
           const albumType = album.album_type ?? 'Album'
           const totalDiscs = album.total_discs != null ? String(album.total_discs) : ''
-          const label = album.label ?? ''
-          const artists = album.artists.map((a) => ({ name: a.name, role: 'Primary', order: a.order }))
+          const labels = album.labels.map((label) => label.name)
+          const artists = album.artists.map((a) => ({ name: a.name, role: 'Primary', order: a.order, type: null }))
           return {
             title: album.title,
             releaseDate,
             albumType,
             totalDiscs,
-            label,
+            labels,
             discNumber: album.disc_number != null ? String(album.disc_number) : '',
             trackNumber: album.track_number != null ? String(album.track_number) : '',
             artists,
             // 歌曲本来就关联着这张专辑，视为隐式已选定（绿灯），编辑其字段同样受改动确认框保护
             selectedAlbumId: album.id,
-            selectedAlbumSnapshot: { releaseDate, albumType, totalDiscs, label, artists }
+            selectedAlbumSnapshot: { releaseDate, albumType, totalDiscs, labels, artists }
           }
         })()
       : EMPTY_FORM.album,
@@ -95,30 +95,60 @@ export default function SongEditModal({
   const [form, setForm] = useState<SongFormValue>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [showReload, setShowReload] = useState(false)
+  const [fileName, setFileName] = useState('')
+  const [replacementFile, setReplacementFile] = useState<ReloadFileSelection | null>(null)
+  const [confirmingDeletion, setConfirmingDeletion] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const { navigate } = useNavStore()
   const albumGuard = useAlbumSubmitGuard()
+  const hasTrack = usePlayerStore((s) => s.currentIndex !== null)
 
   useEffect(() => {
     window.api.songs.detail(songId).then((d) => {
       if (!d) return
       setDetail(d)
       setForm(detailToFormValue(d))
+      setFileName(d.file_name)
     })
   }, [songId])
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key !== 'Escape') return
+      /* 捕获阶段先处理，避免全屏播放器把 ESC 当作关闭播放器。 */
+      event.preventDefault()
+      event.stopPropagation()
+      if (confirmingDeletion) {
+        setConfirmingDeletion(false)
+        return
+      }
+      onClose()
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [confirmingDeletion, onClose])
+
   function startEditing(): void {
     if (detail) setForm(detailToFormValue(detail)) // 从最新数据重新填表，避免残留上次未保存的编辑
+    if (detail) setFileName(detail.file_name)
+    setReplacementFile(null)
+    setSaveError(null)
     setEditing(true)
   }
 
   function cancelEditing(): void {
     if (detail) setForm(detailToFormValue(detail)) // 丢弃改动
+    if (detail) setFileName(detail.file_name)
     setEditing(false)
     setShowReload(false)
+    setReplacementFile(null)
+    setSaveError(null)
   }
 
   async function handleSave(): Promise<void> {
-    if (!form.title.trim() || form.artists.length === 0) return
+    if (!form.title.trim() || !fileName.trim()) return
 
     // 专辑黄灯（同名未选定）/绿灯脏改动需要用户先在弹框中确认，确认结果会回填到 form.album
     const guardResult = await albumGuard.check(form.album)
@@ -129,12 +159,15 @@ export default function SongEditModal({
     const album = guardResult.album
 
     setSaving(true)
+    setSaveError(null)
     try {
-      await window.api.songs.update(songId, {
+      const result = await window.api.songs.update(songId, {
         title: form.title.trim(),
-        bpm: form.bpm.trim() ? Number(form.bpm) : null,
+        fileName: fileName.trim(),
+        replacementFilePath: replacementFile?.filePath ?? null,
         firstHeardDate: form.firstHeardDate.trim() || null,
         lyric: form.lyric.trim() || null,
+        lyricFilePath: form.lyricFilePath,
         artists: form.artists,
         tagIds: form.tags.map((t) => t.id),
         album: album.title.trim()
@@ -143,7 +176,7 @@ export default function SongEditModal({
               releaseDate: album.releaseDate.trim() || null,
               albumType: album.albumType || null,
               totalDiscs: album.totalDiscs.trim() ? Number(album.totalDiscs) : null,
-              label: album.label.trim() || null,
+              labels: album.labels,
               discNumber: album.discNumber.trim() ? Number(album.discNumber) : null,
               trackNumber: album.trackNumber.trim() ? Number(album.trackNumber) : null,
               artists: album.artists,
@@ -153,40 +186,65 @@ export default function SongEditModal({
         score: form.score.trim() ? Number(form.score) : null,
         comment: form.comment.trim() || null
       })
+      usePlayerStore.getState().updateSongFile(songId, result.fileName, result.audioReplaced)
       onSaved()
+    } catch (reason) {
+      setSaveError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setSaving(false)
     }
   }
 
+  async function handleDelete(): Promise<void> {
+    setDeleting(true)
+    try {
+      await window.api.songs.delete(songId)
+      usePlayerStore.getState().removeSong(songId)
+      onSaved()
+      onClose()
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (!detail) {
     return (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center">
+      <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`}>
         <div className="text-neutral-400 text-sm">加载中...</div>
       </div>
     )
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-neutral-900 border border-white/10 rounded-lg w-[520px] max-h-[85vh] overflow-y-auto p-5 flex flex-col gap-4"
+        className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-medium">{editing ? '编辑歌曲信息' : '歌曲信息'}</h2>
+        <div className="window-drag-region flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
+          <h2 className="text-base font-semibold text-white">{editing ? '编辑歌曲信息' : '歌曲信息'}</h2>
           <div className="flex items-center gap-3">
             {!editing && (
-              <button onClick={startEditing} className="text-xs text-neutral-400 hover:text-white underline">
-                编辑
+              <button onClick={startEditing} className="library-icon-button" title="编辑歌曲信息" aria-label="编辑歌曲信息">
+                <Pencil size={16} />
               </button>
             )}
-            <button onClick={onClose} className="text-neutral-500 hover:text-white">
-              ✕
+            <button onClick={() => setConfirmingDeletion(true)} className="library-icon-button text-neutral-500 hover:text-red-300" title="删除歌曲" aria-label="删除歌曲">
+              <Trash2 size={16} />
+            </button>
+            <button onClick={onClose} className="library-icon-button" title="关闭" aria-label="关闭">
+              <X size={18} />
             </button>
           </div>
         </div>
 
+        <div className="modal-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        {confirmingDeletion && (
+          <div className="mb-5 rounded-lg border border-red-400/20 bg-red-400/[0.08] p-4">
+            <p className="text-sm text-red-100">删除后将移除歌曲记录、Music 中的原始音频和歌曲封面，无法恢复。</p>
+            <div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setConfirmingDeletion(false)} disabled={deleting} className="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-white/10">取消</button><button type="button" onClick={handleDelete} disabled={deleting} className="rounded bg-red-400 px-3 py-1.5 text-sm font-medium text-black disabled:opacity-40">{deleting ? '正在删除...' : '确认删除'}</button></div>
+          </div>
+        )}
         {editing ? (
           <>
             <SongForm value={form} onChange={setForm} />
@@ -196,9 +254,18 @@ export default function SongEditModal({
                 {showReload ? '收起 ▲' : '重载音频文件 ▼'}
               </button>
               {showReload && (
-                <ReloadAudioPanel songId={songId} currentFileName={detail.file_name} onReloaded={onSaved} />
+                <ReloadAudioPanel
+                  songId={songId}
+                  currentFileName={detail.file_name}
+                  targetFileName={fileName}
+                  onTargetFileNameChange={setFileName}
+                  selectedFile={replacementFile}
+                  onSelectedFileChange={setReplacementFile}
+                />
               )}
             </div>
+
+            {saveError && <p className="rounded-lg bg-red-400/[0.08] px-3 py-2 text-xs text-red-200">{saveError}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={cancelEditing} className="text-sm px-3 py-1.5 rounded hover:bg-white/10 text-neutral-400">
@@ -206,7 +273,7 @@ export default function SongEditModal({
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || !form.title.trim() || form.artists.length === 0}
+                disabled={saving || !form.title.trim() || !fileName.trim()}
                 className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 保存
@@ -215,7 +282,7 @@ export default function SongEditModal({
           </>
         ) : (
           <>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-4">
               <InfoRow label="歌名" value={detail.title} />
               <LinkedInfoRow
                 label="艺术家"
@@ -234,17 +301,22 @@ export default function SongEditModal({
               <InfoRow label="文件名" value={detail.file_name} />
               <div className="grid grid-cols-4 gap-x-6">
                 <InfoRow label="时长" value={formatDuration(detail.length)} />
-                <InfoRow label="BPM" value={detail.bpm != null ? String(detail.bpm) : '--'} />
-                <InfoRow label="歌词" value={detail.lyric ? '有' : '无'} />
                 <InfoRow label="评分" value={detail.score != null ? String(detail.score) : '--'} />
+                <InfoRow label="歌词" value={detail.lyric ? '有' : '无'} />
+                <div aria-hidden="true" />
               </div>
-              <InfoRow
+              <LinkedInfoRow
                 label="Tags"
-                value={detail.tags.length > 0 ? detail.tags.map((t) => t.name).join(' / ') : '--'}
+                items={detail.tags.map((t) => ({ text: t.name, target: { view: 'tag', id: t.id } as NavTarget }))}
+                emptyText="--"
+                onNavigate={(target) => {
+                  navigate(target, returnContext)
+                  onClose()
+                }}
               />
             </div>
 
-            <div className="border-t border-white/10 pt-3 flex flex-col gap-2">
+            <div className="mt-5 border-t border-white/[0.08] pt-4 flex flex-col gap-3">
               {detail.album ? (
                 <>
                   <LinkedInfoRow
@@ -277,10 +349,10 @@ export default function SongEditModal({
                       value={`${detail.album.disc_number ?? '--'} / ${detail.album.total_discs ?? '--'}`}
                     />
                   </div>
-                  {detail.album.label_id != null && detail.album.label ? (
+                  {detail.album.labels.length > 0 ? (
                     <LinkedInfoRow
                       label="厂牌"
-                      items={[{ text: detail.album.label, target: { view: 'artist', id: detail.album.label_id, isLabel: true } }]}
+                      items={detail.album.labels.map((label) => ({ text: label.name, target: { view: 'artist', id: label.id, isLabel: true } }))}
                       onNavigate={(target) => {
                         navigate(target, returnContext)
                         onClose()
@@ -295,7 +367,7 @@ export default function SongEditModal({
               )}
             </div>
 
-            <div className="border-t border-white/10 pt-3 flex flex-col gap-2">
+            <div className="mt-5 border-t border-white/[0.08] pt-4 flex flex-col gap-3">
               <InfoRow label="添加时间" value={detail.add_time ?? '--'} />
               <div className="grid grid-cols-2 gap-x-6">
                 <InfoRow label="初次聆听日期" value={detail.first_heard_date ?? '--'} />
@@ -305,6 +377,7 @@ export default function SongEditModal({
             </div>
           </>
         )}
+        </div>
       </div>
       {albumGuard.dialog}
     </div>
@@ -313,9 +386,9 @@ export default function SongEditModal({
 
 function InfoRow({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-neutral-500">{label}</span>
-      <span className={`text-sm ${multiline ? 'whitespace-pre-wrap' : 'truncate'}`}>{value}</span>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-xs font-medium text-neutral-500">{label}</span>
+      <span className={`text-sm text-neutral-100 ${multiline ? 'whitespace-pre-wrap leading-6' : 'truncate'}`}>{value}</span>
     </div>
   )
 }
@@ -332,17 +405,17 @@ interface LinkedInfoRowProps {
 /* 可点击跳转的信息行：多个项目用 " / " 分隔，每项点击后触发导航并关闭弹窗；只有名字本身是链接，后缀不带下划线 */
 function LinkedInfoRow({ label, items, emptyText = '--', suffixes, onNavigate }: LinkedInfoRowProps): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-neutral-500">{label}</span>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-xs font-medium text-neutral-500">{label}</span>
       {items.length === 0 ? (
         <span className="text-sm">{emptyText}</span>
       ) : (
-        <div className="text-sm flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 text-sm text-neutral-100">
           {items.map((item, i) => (
             <span key={i}>
               <button
                 onClick={() => onNavigate(item.target)}
-                className="underline hover:text-neutral-300 transition-transform duration-150 ease-out active:scale-95"
+                className="-mx-1 inline-flex min-h-8 items-center rounded-md px-1 text-neutral-200 underline decoration-neutral-500 underline-offset-4 transition hover:bg-white/[0.08] hover:text-white hover:decoration-neutral-200 active:scale-95"
               >
                 {item.text}
               </button>

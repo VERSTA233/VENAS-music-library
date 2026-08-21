@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AlbumRow, AlbumMatchCandidate } from '../../../shared/types'
 import ArtistPicker, { type ArtistFormEntry } from './ArtistPicker'
+import LabelPicker from './LabelPicker'
+import YMDDateInput from './YMDDateInput'
 
 /* album_type 建议值（非数据库约束，仅作为下拉候选，用户可自由输入其他类型） */
 const ALBUM_TYPE_SUGGESTIONS = ['Album', 'EP', 'Single', 'Live', 'Compilation']
@@ -10,7 +12,7 @@ export interface AlbumSnapshot {
   releaseDate: string
   albumType: string
   totalDiscs: string
-  label: string
+  labels: string[]
   artists: ArtistFormEntry[]
 }
 
@@ -21,7 +23,7 @@ export interface AlbumFormState {
   /* 专辑总碟数：专辑级属性，不随单曲变化 */
   totalDiscs: string
   /* 专辑厂牌 */
-  label: string
+  labels: string[]
   /* 这首歌在专辑内所处的碟号/曲目号 */
   discNumber: string
   trackNumber: string
@@ -36,10 +38,12 @@ export interface AlbumFormState {
 interface AlbumPickerProps {
   value: AlbumFormState
   onChange: (value: AlbumFormState) => void
+  /* 修改专辑艺术家的 type 时，调用方可借此同步歌曲艺术家列表中同名条目的 type（仅红灯时触发） */
+  onArtistTypeChange?: (name: string, type: 'Person' | 'Group' | null) => void
 }
 
 function toArtistFormEntries(artists: { name: string; order: number }[]): ArtistFormEntry[] {
-  return artists.map((a) => ({ name: a.name, role: 'Primary', order: a.order }))
+  return artists.map((a) => ({ name: a.name, role: 'Primary', order: a.order, type: null }))
 }
 
 /* 比较当前表单的专辑字段（不含曲目号/碟号）与选定时的快照是否一致，供提交前判断是否需要弹出"改动确认框" */
@@ -49,11 +53,14 @@ export function albumFieldsDirty(value: AlbumFormState): boolean {
   const artistsEqual =
     value.artists.map((a) => a.name.trim().toLowerCase()).join('|') ===
     snapshot.artists.map((a) => a.name.trim().toLowerCase()).join('|')
+  const labelsEqual =
+    value.labels.map((label) => label.trim().toLowerCase()).join('|') ===
+    snapshot.labels.map((label) => label.trim().toLowerCase()).join('|')
   return (
     value.releaseDate !== snapshot.releaseDate ||
     value.albumType !== snapshot.albumType ||
     value.totalDiscs !== snapshot.totalDiscs ||
-    value.label !== snapshot.label ||
+    !labelsEqual ||
     !artistsEqual
   )
 }
@@ -69,16 +76,18 @@ export function applyAlbumCandidate(
     releaseDate: album.release_date ?? '',
     albumType: album.album_type ?? ALBUM_TYPE_SUGGESTIONS[0],
     totalDiscs: album.total_discs != null ? String(album.total_discs) : '',
-    label: album.label ?? '',
+    labels: album.labels.map((label) => label.name),
     artists: artistEntries
   }
+  /* 总碟数已登记为 1 的专辑不存在碟号歧义，尚未手动填写碟号时直接预填 1，省去单碟专辑逐首手动填写的麻烦 */
+  const discNumber = !value.discNumber.trim() && snapshot.totalDiscs === '1' ? '1' : value.discNumber
   return {
     title: album.title,
     releaseDate: snapshot.releaseDate,
     albumType: snapshot.albumType,
     totalDiscs: snapshot.totalDiscs,
-    label: snapshot.label,
-    discNumber: value.discNumber,
+    labels: snapshot.labels,
+    discNumber,
     trackNumber: value.trackNumber,
     artists: artistEntries,
     selectedAlbumId: album.id,
@@ -87,28 +96,13 @@ export function applyAlbumCandidate(
 }
 
 /* 单曲的所属专辑编辑器：专辑名可选，留空表示不入专辑；填了名字才展示发行日期/类型/碟号/曲目号/总碟数/厂牌/专辑艺术家 */
-export default function AlbumPicker({ value, onChange }: AlbumPickerProps): React.JSX.Element {
+export default function AlbumPicker({ value, onChange, onArtistTypeChange }: AlbumPickerProps): React.JSX.Element {
   /* 按标题 LIKE 搜索得到的候选：既用作输入时的自动完成下拉框，也用来判断标题是否与已有专辑精确同名（红/黄/绿灯） */
   const [matches, setMatches] = useState<AlbumMatchCandidate[]>([])
   const [matchLoading, setMatchLoading] = useState(false)
-  /* 厂牌本质上是 artist（type='Label'），与艺术家编辑器一样用绿/红指示灯提示入库时是复用已有还是新建 */
-  const [labelMatched, setLabelMatched] = useState<boolean | undefined>(undefined)
-
-  useEffect(() => {
-    const name = value.label.trim()
-    if (!name) {
-      setLabelMatched(undefined)
-      return
-    }
-    let cancelled = false
-    window.api.artists.matchExact(name).then((matched) => {
-      if (!cancelled) setLabelMatched(matched)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [value.label])
-
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const suggestionRootRef = useRef<HTMLDivElement>(null)
+  const dismissedTitleRef = useRef<string | null>(null)
   /*
    * 无论标题是用户手打的还是程序回填的（如编辑已有歌曲、入库时从 albumartist 自动预填），
    * 只要标题变化就重新拉取同名候选，保证红/黄/绿灯与去重下拉框始终反映当前标题的真实匹配状态。
@@ -118,6 +112,7 @@ export default function AlbumPicker({ value, onChange }: AlbumPickerProps): Reac
     if (!title) {
       setMatches([])
       setMatchLoading(false)
+      setSuggestionsOpen(false)
       return
     }
     let cancelled = false
@@ -126,19 +121,35 @@ export default function AlbumPicker({ value, onChange }: AlbumPickerProps): Reac
       if (cancelled) return
       setMatches(results)
       setMatchLoading(false)
+      if (dismissedTitleRef.current !== title) setSuggestionsOpen(results.length > 0)
     })
     return () => {
       cancelled = true
     }
   }, [value.title])
 
+  useEffect(() => {
+    if (!suggestionsOpen) return
+    function closeOnOutsidePointer(event: PointerEvent): void {
+      if (suggestionRootRef.current?.contains(event.target as Node)) return
+      dismissedTitleRef.current = value.title.trim()
+      setSuggestionsOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [suggestionsOpen, value.title])
+
   function handleTitleChange(title: string): void {
     // 手动改动标题文本视为放弃此前的选定，重新判定红/黄/绿灯
+    dismissedTitleRef.current = null
+    setSuggestionsOpen(true)
     onChange({ ...value, title, selectedAlbumId: null, selectedAlbumSnapshot: null })
   }
 
   async function pickExisting(album: AlbumRow): Promise<void> {
     const detail = await window.api.albums.detail(album.id)
+    setSuggestionsOpen(false)
     onChange(applyAlbumCandidate(value, album, detail?.artists ?? []))
   }
 
@@ -160,7 +171,7 @@ export default function AlbumPicker({ value, onChange }: AlbumPickerProps): Reac
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative">
+      <div ref={suggestionRootRef} className="relative">
         <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded px-2 py-1 focus-within:border-white/30">
           <span
             className={`w-2 h-2 rounded-full flex-shrink-0 ${
@@ -185,11 +196,21 @@ export default function AlbumPicker({ value, onChange }: AlbumPickerProps): Reac
           <input
             value={value.title}
             onChange={(e) => handleTitleChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Tab' && suggestionsOpen && matches[0] && value.selectedAlbumId == null) {
+                e.preventDefault()
+                void pickExisting(matches[0])
+              }
+            }}
+            onFocus={() => {
+              dismissedTitleRef.current = null
+              if (matches.length > 0 && value.selectedAlbumId == null) setSuggestionsOpen(true)
+            }}
             placeholder="专辑名"
             className="flex-1 min-w-0 bg-transparent text-sm outline-none"
           />
         </div>
-        {matches.length > 0 && value.selectedAlbumId == null && (
+        {suggestionsOpen && matches.length > 0 && value.selectedAlbumId == null && (
           <div className="absolute z-10 mt-1 w-full bg-neutral-900 border border-white/10 rounded shadow-lg max-h-40 overflow-y-auto">
             {matches.map((a) => (
               <div
@@ -215,38 +236,30 @@ export default function AlbumPicker({ value, onChange }: AlbumPickerProps): Reac
               artists={value.artists}
               onChange={(artists) => onChange({ ...value, artists })}
               showRole={false}
+              onTypeChange={onArtistTypeChange}
             />
           </div>
           <div className="flex items-center gap-2 bg-white/5 rounded px-2 py-1">
-            <span
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                labelMatched === undefined ? 'bg-neutral-600' : labelMatched ? 'bg-green-500' : 'bg-red-500'
-              }`}
-              title={
-                labelMatched === undefined
-                  ? '匹配中...'
-                  : labelMatched
-                    ? '已匹配数据库中的艺术家'
-                    : '数据库中不存在，入库时将新建'
-              }
-            />
-            <input
-              value={value.label}
-              onChange={(e) => onChange({ ...value, label: e.target.value })}
-              placeholder="厂牌"
-              className="flex-1 min-w-0 bg-transparent text-sm outline-none border-b border-transparent focus:border-white/30"
-            />
+            <LabelPicker values={value.labels} onChange={(labels) => onChange({ ...value, labels })} />
           </div>
           <div className="flex gap-2">
-            <input
+            <YMDDateInput
               value={value.releaseDate}
-              onChange={(e) => onChange({ ...value, releaseDate: e.target.value })}
-              placeholder="发行日期（YYYY-MM-DD）"
-              className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
+              onChange={(releaseDate) => onChange({ ...value, releaseDate })}
+              className="flex-1"
             />
             <select
               value={value.albumType}
-              onChange={(e) => onChange({ ...value, albumType: e.target.value })}
+              onChange={(e) => {
+                const albumType = e.target.value
+                const isSingleDiscRelease = albumType === 'Single' || albumType === 'EP'
+                onChange({
+                  ...value,
+                  albumType,
+                  discNumber: isSingleDiscRelease ? '1' : value.discNumber,
+                  totalDiscs: isSingleDiscRelease ? '1' : value.totalDiscs
+                })
+              }}
               className="bg-white/5 border border-white/10 rounded text-sm px-1 outline-none"
             >
               {ALBUM_TYPE_SUGGESTIONS.map((t) => (

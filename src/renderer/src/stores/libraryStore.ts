@@ -1,31 +1,45 @@
 import { create } from 'zustand'
-import type { SongListItem } from '../../../shared/types'
+import type { SongListItem, SongListSort } from '../../../shared/types'
 
-const PAGE_SIZE = 50
+let requestVersion = 0
 
 interface LibraryState {
   songs: SongListItem[]
   total: number
-  offset: number
+  sort: SongListSort
+  query: string
   loading: boolean
-  fetchPage: (offset: number) => Promise<void>
+  fetchSongs: () => Promise<void>
+  setSort: (sort: SongListSort) => Promise<void>
+  setQuery: (query: string) => Promise<void>
   refresh: () => Promise<void>
 }
 
-/* Music 库分页列表状态，MVP 阶段仅 List 视图，分页大小固定 */
+/* Music 库完整列表状态：排序与搜索始终作用于同一份完整结果集。 */
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   songs: [],
   total: 0,
-  offset: 0,
+  sort: 'library',
+  query: '',
   loading: false,
-  fetchPage: async (offset: number) => {
+  fetchSongs: async () => {
+    const version = ++requestVersion
+    const { sort, query } = get()
     set({ loading: true })
-    const { items, total } = await window.api.songs.list(offset, PAGE_SIZE)
-    set({ songs: items, total, offset, loading: false })
+    const { items, total } = await window.api.songs.list(sort, query)
+    if (version === requestVersion) set({ songs: items, total, loading: false })
+  },
+  setSort: async (sort: SongListSort) => {
+    set({ sort })
+    await get().fetchSongs()
+  },
+  setQuery: async (query: string) => {
+    const normalized = query.trim()
+    if (normalized === get().query) return
+    set({ query: normalized })
+    await get().fetchSongs()
   },
   refresh: async () => {
-    await get().fetchPage(get().offset)
+    await get().fetchSongs()
   }
 }))
-
-export { PAGE_SIZE }

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
-import type { AlbumRow, AlbumListItem, AlbumMatchCandidate, SongAlbumDetail, AlbumSongItem } from '../../../shared/types'
+import type { AlbumRow, AlbumLabel, AlbumListItem, AlbumMatchCandidate, SongAlbumDetail, AlbumSongItem } from '../../../shared/types'
 import { findOrCreateLabelArtist } from './artists'
+import { withArtistNames } from './songList'
 
 export type { AlbumRow }
 
@@ -9,24 +10,59 @@ export interface AlbumArtistInput {
   order: number
 }
 
-/* albums 表 LEFT JOIN artists 拿厂牌名称，供展示/回填表单用；label 本身不是 albums 表的实际列 */
+type AlbumBaseRow = Omit<AlbumRow, 'labels'>
+
 const ALBUM_SELECT = `
   SELECT al.id AS id, al.title AS title, al.release_date AS release_date, al.album_type AS album_type,
-         al.total_discs AS total_discs, al.label_id AS label_id, lb.name AS label
-  FROM albums al LEFT JOIN artists lb ON lb.id = al.label_id
+         al.total_discs AS total_discs
+  FROM albums al
 `
+
+export function getAlbumLabels(db: Database.Database, albumId: number): AlbumLabel[] {
+  return db
+    .prepare<[number], AlbumLabel>(
+      `SELECT ar.id AS id, ar.name AS name, abl.label_order AS "order"
+       FROM album_labels abl
+       JOIN artists ar ON ar.id = abl.label_id
+       WHERE abl.album_id = ?
+       ORDER BY abl.label_order ASC, ar.id ASC`
+    )
+    .all(albumId)
+}
+
+/* 覆盖专辑全部厂牌；名称忽略大小写去重，保留用户给出的顺序。 */
+export function setAlbumLabels(db: Database.Database, albumId: number, labels: string[]): void {
+  const normalizedLabels: string[] = []
+  const seen = new Set<string>()
+  for (const source of labels) {
+    const name = source.trim()
+    const key = name.toLocaleLowerCase()
+    if (!name || seen.has(key)) continue
+    seen.add(key)
+    normalizedLabels.push(name)
+  }
+
+  db.transaction(() => {
+    db.prepare('DELETE FROM album_labels WHERE album_id = ?').run(albumId)
+    const insert = db.prepare('INSERT INTO album_labels (album_id, label_id, label_order) VALUES (?, ?, ?)')
+    for (const [order, name] of normalizedLabels.entries()) {
+      insert.run(albumId, findOrCreateLabelArtist(db, name), order)
+    }
+  })()
+}
 
 export function createAlbum(
   db: Database.Database,
-  data: { title: string; releaseDate: string | null; albumType: string | null; totalDiscs: number | null; label: string | null }
+  data: { title: string; releaseDate: string | null; albumType: string | null; totalDiscs: number | null; labels: string[] }
 ): number {
-  const labelId = data.label ? findOrCreateLabelArtist(db, data.label) : null
   const info = db
     .prepare(
-      'INSERT INTO albums (title, release_date, album_type, total_discs, label_id) VALUES (@title, @releaseDate, @albumType, @totalDiscs, @labelId)'
+      'INSERT INTO albums (title, release_date, album_type, total_discs) VALUES (@title, @releaseDate, @albumType, @totalDiscs)'
     )
-    .run({ title: data.title, releaseDate: data.releaseDate, albumType: data.albumType, totalDiscs: data.totalDiscs, labelId })
-  return Number(info.lastInsertRowid)
+    .run({ title: data.title, releaseDate: data.releaseDate, albumType: data.albumType, totalDiscs: data.totalDiscs })
+  const albumId = Number(info.lastInsertRowid)
+  setAlbumLabels(db, albumId, data.labels)
+  return albumId
 }
 
 /*
@@ -36,23 +72,34 @@ export function createAlbum(
 export function updateAlbumFields(
   db: Database.Database,
   albumId: number,
-  data: { title: string; releaseDate: string | null; albumType: string | null; totalDiscs: number | null; label: string | null }
+  data: { title: string; releaseDate: string | null; albumType: string | null; totalDiscs: number | null; labels: string[] }
 ): void {
-  const labelId = data.label ? findOrCreateLabelArtist(db, data.label) : null
   db.prepare(
-    'UPDATE albums SET title = @title, release_date = @releaseDate, album_type = @albumType, total_discs = @totalDiscs, label_id = @labelId WHERE id = @albumId'
-  ).run({ title: data.title, releaseDate: data.releaseDate, albumType: data.albumType, totalDiscs: data.totalDiscs, labelId, albumId })
+    'UPDATE albums SET title = @title, release_date = @releaseDate, album_type = @albumType, total_discs = @totalDiscs WHERE id = @albumId'
+  ).run({ title: data.title, releaseDate: data.releaseDate, albumType: data.albumType, totalDiscs: data.totalDiscs, albumId })
+  setAlbumLabels(db, albumId, data.labels)
 }
 
-/* 按标题搜索（含 LIKE 模糊匹配），附带每张专辑的艺术家拼接字符串，供前端红黄绿灯判定与去重下拉框展示用 */
+/*
+ * 按标题搜索（含 LIKE 模糊匹配），附带每张专辑的艺术家拼接字符串，供前端红黄绿灯判定与去重下拉框展示用。
+ * 候选数量有限时，完全同名和前缀匹配必须排在普通包含匹配前面；否则单字符标题（例如 U）会被大量
+ * 名称中恰好含该字符的专辑挤出前 20 条，导致入库时无法选择已有专辑。
+ */
 export function searchAlbums(db: Database.Database, query: string): AlbumMatchCandidate[] {
   const rows = db
-    .prepare<[string], AlbumRow>(`${ALBUM_SELECT} WHERE al.title LIKE ? COLLATE NOCASE ORDER BY al.title LIMIT 20`)
-    .all(`%${query}%`)
-  return rows.map((row): AlbumMatchCandidate => {
-    const artists = getAlbumArtists(db, row.id)
-    return { ...row, artistNames: artists.map((a) => a.name).join(', ') }
-  })
+    .prepare<[string, string, string], AlbumBaseRow>(
+      `${ALBUM_SELECT}
+       WHERE al.title LIKE ? COLLATE NOCASE
+       ORDER BY CASE
+         WHEN al.title = ? COLLATE NOCASE THEN 0
+         WHEN al.title LIKE ? COLLATE NOCASE THEN 1
+         ELSE 2
+       END,
+       al.title COLLATE NOCASE
+       LIMIT 20`
+    )
+    .all(`%${query}%`, query, `${query}%`)
+  return withAlbumArtistNames(db, withAlbumLabels(db, rows))
 }
 
 /* 建立/覆盖 song 在某专辑内的曲目位置（一首歌同一时刻只属于一张专辑，重复入库时先清旧关联）；碟号/曲目号均可留空不填 */
@@ -104,22 +151,19 @@ export function getSongAlbum(db: Database.Database, songId: number): SongAlbumDe
         release_date: string | null
         album_type: string | null
         total_discs: number | null
-        label_id: number | null
-        label: string | null
         disc_number: number | null
         track_number: number | null
       }
     >(
       `SELECT al.id AS id, al.title AS title, al.release_date AS release_date, al.album_type AS album_type,
-              al.total_discs AS total_discs, al.label_id AS label_id, lb.name AS label,
+              al.total_discs AS total_discs,
               als.disc_number AS disc_number, als.track_number AS track_number
        FROM album_songs als JOIN albums al ON al.id = als.album_id
-       LEFT JOIN artists lb ON lb.id = al.label_id
        WHERE als.song_id = ?`
     )
     .get(songId)
   if (!row) return null
-  return { ...row, artists: getAlbumArtists(db, row.id) }
+  return { ...row, labels: getAlbumLabels(db, row.id), artists: getAlbumArtists(db, row.id) }
 }
 
 /*
@@ -128,27 +172,23 @@ export function getSongAlbum(db: Database.Database, songId: number): SongAlbumDe
  */
 export function listAlbums(db: Database.Database): AlbumListItem[] {
   const rows = db
-    .prepare<[], AlbumRow & { songCount: number }>(
+    .prepare<[], AlbumBaseRow & { songCount: number }>(
       `SELECT al.id AS id, al.title AS title, al.release_date AS release_date, al.album_type AS album_type,
-              al.total_discs AS total_discs, al.label_id AS label_id, lb.name AS label,
+              al.total_discs AS total_discs,
               COUNT(DISTINCT als.song_id) AS songCount
        FROM albums al
-       LEFT JOIN artists lb ON lb.id = al.label_id
        LEFT JOIN album_songs als ON als.album_id = al.id
        GROUP BY al.id
        ORDER BY al.title COLLATE NOCASE`
     )
     .all()
 
-  return rows.map((row): AlbumListItem => {
-    const artists = getAlbumArtists(db, row.id)
-    return { ...row, artistNames: artists.map((a) => a.name).join(', ') }
-  })
+  return withAlbumArtistNames(db, withAlbumLabels(db, rows))
 }
 
 export function getAlbumById(db: Database.Database, albumId: number): AlbumRow | null {
-  const row = db.prepare<[number], AlbumRow>(`${ALBUM_SELECT} WHERE al.id = ?`).get(albumId)
-  return row ?? null
+  const row = db.prepare<[number], AlbumBaseRow>(`${ALBUM_SELECT} WHERE al.id = ?`).get(albumId)
+  return row ? { ...row, labels: getAlbumLabels(db, albumId) } : null
 }
 
 /* 专辑详情页曲目列表：按 disc_number、track_number 严格升序排列（规格 §4.3 视图 D 要求） */
@@ -161,26 +201,66 @@ export function getAlbumSongs(db: Database.Database, albumId: number): AlbumSong
         title: string
         length: number | null
         file_name: string
+        add_time: string | null
         disc_number: number | null
         track_number: number | null
       }
     >(
-      `SELECT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name,
+      `SELECT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name, si.add_time AS add_time,
               als.disc_number AS disc_number, als.track_number AS track_number
        FROM album_songs als JOIN songs s ON s.id = als.song_id
+       LEFT JOIN song_info si ON si.song_id = s.id
        WHERE als.album_id = ?
        ORDER BY als.disc_number ASC, als.track_number ASC`
     )
     .all(albumId)
 
-  const artistStmt = db.prepare<[number], { name: string }>(
-    `SELECT ar.name AS name
-     FROM song_artists sa JOIN artists ar ON ar.id = sa.artist_id
-     WHERE sa.song_id = ? ORDER BY sa.artist_order ASC`
-  )
+  return withArtistNames(db, rows)
+}
 
-  return rows.map((row): AlbumSongItem => {
-    const artistRows = artistStmt.all(row.id)
-    return { ...row, artistNames: artistRows.map((a) => a.name).join(', ') }
-  })
+/* 给专辑列表批量附加专辑艺术家显示名，避免一张专辑一次 getAlbumArtists 查询。 */
+function withAlbumArtistNames<T extends { id: number }>(db: Database.Database, rows: T[]): (T & { artistNames: string })[] {
+  if (rows.length === 0) return []
+
+  const ids = rows.map((row) => row.id)
+  const placeholders = ids.map(() => '?').join(', ')
+  const artistRows = db
+    .prepare<(number)[], { album_id: number; name: string }>(
+      `SELECT aa.album_id, ar.name
+       FROM album_artists aa
+       JOIN artists ar ON ar.id = aa.artist_id
+       WHERE aa.album_id IN (${placeholders})
+       ORDER BY aa.album_id ASC, aa.artist_order ASC`
+    )
+    .all(...ids)
+  const namesByAlbumId = new Map<number, string[]>()
+  for (const artist of artistRows) {
+    const names = namesByAlbumId.get(artist.album_id) ?? []
+    names.push(artist.name)
+    namesByAlbumId.set(artist.album_id, names)
+  }
+  return rows.map((row) => ({ ...row, artistNames: (namesByAlbumId.get(row.id) ?? []).join(' / ') }))
+}
+
+export function withAlbumLabels<T extends { id: number }>(db: Database.Database, rows: T[]): (T & { labels: AlbumLabel[] })[] {
+  if (rows.length === 0) return []
+
+  const ids = rows.map((row) => row.id)
+  const placeholders = ids.map(() => '?').join(', ')
+  const labelRows = db
+    .prepare<number[], { album_id: number; id: number; name: string; order: number }>(
+      `SELECT abl.album_id AS album_id, ar.id AS id, ar.name AS name, abl.label_order AS "order"
+       FROM album_labels abl
+       JOIN artists ar ON ar.id = abl.label_id
+       WHERE abl.album_id IN (${placeholders})
+       ORDER BY abl.album_id ASC, abl.label_order ASC, ar.id ASC`
+    )
+    .all(...ids)
+  const labelsByAlbumId = new Map<number, AlbumLabel[]>()
+  for (const label of labelRows) {
+    const labels = labelsByAlbumId.get(label.album_id) ?? []
+    labels.push({ id: label.id, name: label.name, order: label.order })
+    labelsByAlbumId.set(label.album_id, labels)
+  }
+  return rows.map((row) => ({ ...row, labels: labelsByAlbumId.get(row.id) ?? [] }))
 }

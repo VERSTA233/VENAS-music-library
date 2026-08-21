@@ -74,7 +74,7 @@ export function useAlbumSubmitGuard(): { check: (album: AlbumFormState) => Promi
           releaseDate: snapshot.releaseDate,
           albumType: snapshot.albumType,
           totalDiscs: snapshot.totalDiscs,
-          label: snapshot.label,
+          labels: snapshot.labels,
           artists: snapshot.artists
         }
       : pending.album
@@ -85,7 +85,7 @@ export function useAlbumSubmitGuard(): { check: (album: AlbumFormState) => Promi
   let dialog: React.JSX.Element | null = null
   if (pending?.kind === 'dedupe') {
     dialog = (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+      <div className="modal-safe-area fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
         <div className="bg-neutral-900 border border-white/10 rounded-lg w-[420px] p-4 flex flex-col gap-3">
           <div className="text-sm">
             检测到 {pending.candidates.length} 张同名专辑《{pending.album.title.trim()}》，请选择其中一张，或直接新建一张同名专辑：
@@ -112,7 +112,7 @@ export function useAlbumSubmitGuard(): { check: (album: AlbumFormState) => Promi
     )
   } else if (pending?.kind === 'change') {
     dialog = (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+      <div className="modal-safe-area fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
         <div className="bg-neutral-900 border border-white/10 rounded-lg w-[380px] p-4 flex flex-col gap-3">
           <div className="text-sm">
             检测到专辑《{pending.album.title.trim()}》的信息被修改。该专辑可能被多首歌共用，是否将这些改动应用到专辑本身？

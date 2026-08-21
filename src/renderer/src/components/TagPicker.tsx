@@ -1,20 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { TagRow } from '../../../shared/types'
-
-/* tag_type 建议值（非数据库约束，仅作为新建 Tag 时的类型候选，用户可自由输入其他类型） */
-const TAG_TYPE_SUGGESTIONS = [
-  'Genre',
-  'Mood',
-  'Playlist',
-  'Scene',
-  'Chart',
-  'Theme',
-  'Work',
-  'Memory',
-  'Best',
-  'Month',
-  'Year'
-]
+import { TAG_TYPE_OPTIONS } from '../tagTypes'
 
 interface TagPickerProps {
   tags: TagRow[]
@@ -25,19 +11,23 @@ interface TagPickerProps {
 export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<TagRow[]>([])
-  const [newTagType, setNewTagType] = useState(TAG_TYPE_SUGGESTIONS[0])
+  const [newTagType, setNewTagType] = useState<string>(TAG_TYPE_OPTIONS[0])
+  const searchRequestRef = useRef(0)
 
   async function handleQueryChange(value: string): Promise<void> {
+    const requestId = ++searchRequestRef.current
     setQuery(value)
     if (!value.trim()) {
       setSuggestions([])
       return
     }
-    setSuggestions(await window.api.tags.search(value))
+    const results = await window.api.tags.search(value)
+    if (requestId === searchRequestRef.current) setSuggestions(results)
   }
 
   function addExisting(tag: TagRow): void {
     if (tags.some((t) => t.id === tag.id)) return
+    searchRequestRef.current += 1
     onChange([...tags, tag])
     setQuery('')
     setSuggestions([])
@@ -47,6 +37,7 @@ export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX
     const name = query.trim()
     if (!name) return
     if (tags.some((t) => t.name.toLowerCase() === name.toLowerCase())) return
+    searchRequestRef.current += 1
     const id = await window.api.tags.create(name, newTagType)
     onChange([...tags, { id, name, tag_type: newTagType, description: null }])
     setQuery('')
@@ -65,6 +56,12 @@ export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX
         <input
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Tab' && suggestions[0]) {
+              e.preventDefault()
+              addExisting(suggestions[0])
+            }
+          }}
           placeholder="搜索或新建 Tag"
           className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
         />
@@ -75,7 +72,7 @@ export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX
               onChange={(e) => setNewTagType(e.target.value)}
               className="bg-white/5 border border-white/10 rounded text-xs px-1 outline-none"
             >
-              {TAG_TYPE_SUGGESTIONS.map((t) => (
+              {TAG_TYPE_OPTIONS.map((t) => (
                 <option key={t} value={t} className="bg-neutral-900">
                   {t}
                 </option>

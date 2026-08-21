@@ -80,3 +80,9 @@ export async function writeArtistPicture(paths: LibraryPaths, artistId: number, 
   const buffer = await compressCover(imageData)
   writeFileSync(join(paths.assetsArtistPictures, `${artistId}.jpg`), buffer)
 }
+
+/* 专辑封面是专辑级缓存；手动上传总是覆盖现有缓存。 */
+export async function writeAlbumPicture(paths: LibraryPaths, albumId: number, imageData: Buffer): Promise<void> {
+  const buffer = await compressCover(imageData)
+  writeFileSync(albumPicturePath(paths, albumId), buffer)
+}

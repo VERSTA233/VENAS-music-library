@@ -1,52 +1,67 @@
 import { useEffect, useRef, useState } from 'react'
+import { ListMusic, MoreHorizontal } from 'lucide-react'
 import { usePlayerStore } from '../stores/playerStore'
+import SongEditModal from './SongEditModal'
+import IngestModal from './IngestModal'
+import PlaybackCover from './PlaybackCover'
+import PlaybackControls from './PlaybackControls'
+import QueuePanel from './QueuePanel'
+import type { AppendEntry } from '../../../shared/types'
+import PlaybackProgress from './PlaybackProgress'
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds)) return '0:00'
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-/* 底部播放条：播放/暂停/上一首/下一首、可拖拽进度条，播放超过 60% 或播放完成时打 last_heard_date 钩子 */
-export default function BottomPlayerBar(): React.JSX.Element | null {
-  const { queue, currentIndex, isPlaying, togglePlay, playNext, playPrev, setPlaying } = usePlayerStore()
+/* 常驻音频引擎留在此组件中；全屏层与底部条共用 store，所以收放界面不会重新加载媒体。 */
+export default function BottomPlayerBar({ hidden, onOpenFullPlayer }: { hidden: boolean; onOpenFullPlayer: () => void }): React.JSX.Element | null {
+  const { queue, currentIndex, isPlaying, togglePlay, playNext, playPrev, playAt, setPlaying, playbackMode, setPlaybackMode, currentTime, duration, setTimeline, seekRequest, transientPlaybackSource } = usePlayerStore()
   const audioRef = useRef<HTMLAudioElement>(null)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
   const touchedRef = useRef(false)
-  /* 拖拽进度条期间：只更新滑块位置的显示值，不触碰 audio.currentTime，避免拖动过程中不断打断播放；
-     松手（或键盘方向键单次调整）时才真正 seek */
-  const seekingRef = useRef(false)
-
-  const currentTrack = currentIndex !== null ? queue[currentIndex] : null
+  const [editingSongId, setEditingSongId] = useState<number | null>(null)
+  const [ingestingEntry, setIngestingEntry] = useState<AppendEntry | null>(null)
+  const [playlistOpen, setPlaylistOpen] = useState(false)
+  const playlistRef = useRef<HTMLDivElement>(null)
+  const playlistTriggerRef = useRef<HTMLButtonElement>(null)
+  const currentTrack = currentIndex == null ? null : queue[currentIndex] ?? null
+  const playbackUrl = currentTrack && transientPlaybackSource?.trackKey === currentTrack.key
+    ? transientPlaybackSource.mediaUrl
+    : currentTrack?.mediaUrl
 
   useEffect(() => {
     touchedRef.current = false
-    setCurrentTime(0)
-  }, [currentTrack])
+    const state = usePlayerStore.getState()
+    const restoringPosition = state.currentTime > 0 && state.seekRequest?.time === state.currentTime && state.seekRequest.trackKey === currentTrack?.key
+    setTimeline(restoringPosition ? state.currentTime : 0, 0)
+  }, [playbackUrl, setTimeline])
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-    if (isPlaying) {
-      audio.play().catch(() => setPlaying(false))
-    } else {
-      audio.pause()
+    if (isPlaying) audio.play().catch(() => setPlaying(false))
+    else audio.pause()
+  }, [isPlaying, playbackUrl, setPlaying])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || !seekRequest || seekRequest.trackKey !== currentTrack?.key) return
+    audio.currentTime = seekRequest.time
+    /* 播放/暂停由上面的播放状态 effect 负责；这里不能依赖 isPlaying，
+       否则每次暂停或继续都会重复跳回上一次 seek 目标。 */
+  }, [currentTrack?.key, seekRequest])
+
+  useEffect(() => {
+    if (!playlistOpen) return
+    function closeOnOutsidePointer(event: PointerEvent): void {
+      const target = event.target as Node
+      if (playlistRef.current?.contains(target) || playlistTriggerRef.current?.contains(target)) return
+      setPlaylistOpen(false)
     }
-  }, [isPlaying, currentTrack, setPlaying])
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [playlistOpen])
 
   function handleTimeUpdate(): void {
     const audio = audioRef.current
     if (!audio) return
-    // 拖拽过程中滑块显示值由用户手动控制，不能被这里持续覆盖，否则拖动会被"弹回"当前播放位置
-    if (!seekingRef.current) setCurrentTime(audio.currentTime)
-    if (
-      !touchedRef.current &&
-      currentTrack?.songId != null &&
-      audio.duration > 0 &&
-      audio.currentTime / audio.duration >= 0.6
-    ) {
+    setTimeline(audio.currentTime)
+    if (!touchedRef.current && currentTrack?.songId != null && audio.duration > 0 && audio.currentTime / audio.duration >= 0.6) {
       touchedRef.current = true
       window.api.playback.touchLastHeard(currentTrack.songId)
     }
@@ -57,70 +72,60 @@ export default function BottomPlayerBar(): React.JSX.Element | null {
       touchedRef.current = true
       window.api.playback.touchLastHeard(currentTrack.songId)
     }
+
+    const finishedIndex = currentIndex
     playNext()
-  }
 
-  /* 拖动过程中每次 onChange 只更新显示用的 currentTime，不动 audio.currentTime，播放不受影响 */
-  function handleSeekPreview(e: React.ChangeEvent<HTMLInputElement>): void {
-    seekingRef.current = true
-    setCurrentTime(Number(e.target.value))
-  }
-
-  /* 松手（mouse/touch/pointer up）或键盘操作结束时才真正 seek 到滑块当前指向的位置 */
-  function commitSeek(): void {
-    if (!seekingRef.current) return
-    seekingRef.current = false
-    const audio = audioRef.current
-    if (!audio) return
-    audio.currentTime = currentTime
+    /* 单曲队列的 playNext() 不会改变索引，音频已自然结束时必须同步为暂停，避免按钮仍显示双竖线。 */
+    if (finishedIndex !== null && usePlayerStore.getState().currentIndex === finishedIndex) {
+      setPlaying(false)
+    }
   }
 
   if (!currentTrack) return null
+  const track = currentTrack
+
+  function openTrackDetail(): void {
+    if (track.songId != null) setEditingSongId(track.songId)
+    else if (track.appendEntry) setIngestingEntry(track.appendEntry)
+  }
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 border-t border-white/10 bg-neutral-950">
+    <>
       <audio
         ref={audioRef}
-        src={currentTrack.mediaUrl}
+        src={playbackUrl}
         onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onSeeked={handleTimeUpdate}
+        onLoadedMetadata={(event) => {
+          const seekRequest = usePlayerStore.getState().seekRequest
+          const requestedTime = seekRequest?.trackKey === track.key ? seekRequest.time : null
+          if (requestedTime != null) event.currentTarget.currentTime = Math.min(requestedTime, event.currentTarget.duration || requestedTime)
+          setTimeline(event.currentTarget.currentTime, event.currentTarget.duration)
+        }}
         onEnded={handleEnded}
         autoPlay={isPlaying}
       />
+      <div className={`relative z-[90] grid h-[76px] shrink-0 grid-cols-[minmax(180px,0.6fr)_auto_auto_auto_auto_minmax(280px,2fr)_auto_auto] items-center gap-3 border-t border-white/[0.08] bg-neutral-950/95 px-4 backdrop-blur-xl transition-opacity ${hidden ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
+        <button type="button" onClick={onOpenFullPlayer} className="group flex min-w-0 items-center gap-3 text-left" title="打开全屏播放界面">
+          <PlaybackCover track={track} className="h-11 w-11 shrink-0 rounded-lg object-cover shadow-lg transition duration-200 group-active:scale-95" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium text-white">{track.title}</span>
+            <span className="block truncate text-xs text-neutral-500">{track.artistNames}</span>
+          </span>
+        </button>
 
-      <div className="w-40 min-w-0">
-        <div className="truncate text-sm">{currentTrack.title}</div>
-        <div className="truncate text-xs text-neutral-500">{currentTrack.artistNames}</div>
+        <PlaybackControls variant="compact" isPlaying={isPlaying} playbackMode={playbackMode} onToggleMode={() => setPlaybackMode(playbackMode === 'shuffle' ? 'sequential' : 'shuffle')} onPrevious={playPrev} onTogglePlay={togglePlay} onNext={playNext} />
+        <PlaybackProgress currentTime={currentTime} duration={duration} isPlaying={isPlaying} onSeek={(time) => usePlayerStore.getState().requestSeek(time)} />
+
+        <button type="button" onClick={openTrackDetail} className="rounded p-2 text-neutral-500 transition active:scale-95 hover:bg-white/10 hover:text-white" title="歌曲信息 / 添加到音乐库" aria-label="歌曲信息 / 添加到音乐库"><MoreHorizontal size={20} /></button>
+        <button ref={playlistTriggerRef} type="button" onClick={() => setPlaylistOpen((value) => !value)} className={`rounded p-2 transition active:scale-95 hover:bg-white/10 ${playlistOpen ? 'text-white' : 'text-neutral-500 hover:text-white'}`} title="当前播放列表" aria-label="当前播放列表"><ListMusic size={19} /></button>
+
+        <QueuePanel open={playlistOpen} variant="bottom" queue={queue} currentIndex={currentIndex} onPlayAt={playAt} onClose={() => setPlaylistOpen(false)} panelRef={playlistRef} />
       </div>
 
-      <button onClick={playPrev} disabled={currentIndex === 0} className="text-neutral-400 hover:text-white disabled:opacity-30">
-        ⏮
-      </button>
-      <button onClick={togglePlay} className="text-white text-lg">
-        {isPlaying ? '⏸' : '▶'}
-      </button>
-      <button
-        onClick={playNext}
-        disabled={currentIndex === null || currentIndex + 1 >= queue.length}
-        className="text-neutral-400 hover:text-white disabled:opacity-30"
-      >
-        ⏭
-      </button>
-
-      <span className="text-xs text-neutral-500 w-10 text-right">{formatTime(currentTime)}</span>
-      <input
-        type="range"
-        min={0}
-        max={duration || 0}
-        step="any"
-        value={currentTime}
-        onChange={handleSeekPreview}
-        onMouseUp={commitSeek}
-        onTouchEnd={commitSeek}
-        onKeyUp={commitSeek}
-        className="flex-1 accent-white"
-      />
-      <span className="text-xs text-neutral-500 w-10">{formatTime(duration)}</span>
-    </div>
+      {editingSongId != null && <SongEditModal songId={editingSongId} onClose={() => setEditingSongId(null)} onSaved={() => setEditingSongId(null)} />}
+      {ingestingEntry && <IngestModal entry={ingestingEntry} onClose={() => setIngestingEntry(null)} onIngested={() => setIngestingEntry(null)} />}
+    </>
   )
 }

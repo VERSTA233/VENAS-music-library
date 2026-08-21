@@ -1,5 +1,5 @@
 import { renameSync, existsSync, statSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { parseFile } from 'music-metadata'
 import type { LibraryPaths } from './paths'
 import { getDatabase } from '../db'
@@ -30,11 +30,18 @@ function formatLocalDateTime(d: Date): string {
 /* 执行入库：Append -> Music 移动 + 写库 + 封面缓存。任一数据库步骤失败则把文件移回 Append。 */
 export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promise<IngestResult> {
   const db = getDatabase()
+  if (!req.fileName || basename(req.fileName) !== req.fileName || /[/\\]/.test(req.fileName)) {
+    throw new IngestConflictError('Append 源文件名不合法')
+  }
   const sourcePath = join(paths.append, req.fileName)
   const targetFileName = req.targetFileName
-  /* 目标文件名不能包含路径分隔符，否则 join 会把它当成子目录，导致目标目录不存在而写入失败 */
-  if (/[/\\]/.test(targetFileName)) {
-    throw new IngestConflictError('文件名不能包含 / 或 \\')
+  if (
+    !targetFileName ||
+    targetFileName !== targetFileName.trim() ||
+    basename(targetFileName) !== targetFileName ||
+    /[/\\]/.test(targetFileName)
+  ) {
+    throw new IngestConflictError('目标文件名不能为空、包含前后空格或路径分隔符')
   }
   const targetPath = join(paths.music, targetFileName)
 
@@ -46,8 +53,8 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
   const meta = await parseFile(sourcePath)
   const length = meta.format.duration ? Math.round(meta.format.duration) : null
   const cover = meta.common.picture?.[0] ? Buffer.from(meta.common.picture[0].data) : null
-  // add_time 记录音频文件本身的创建时间，而非入库操作发生的时刻；需在文件被移动前读取
-  const addTime = formatLocalDateTime(statSync(sourcePath).birthtime)
+  // add_time 记录音频文件本身的修改时间，而非入库操作发生的时刻；需在文件被移动前读取
+  const addTime = formatLocalDateTime(statSync(sourcePath).mtime)
 
   renameSync(sourcePath, targetPath)
 
@@ -57,15 +64,14 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
       const id = createSong(db, {
         title: req.title,
         length,
-        bpm: req.bpm,
         lyric: req.lyric,
         file_name: targetFileName
       })
 
-      const artistInputs: SongArtistInput[] = req.artists.map((a) => ({
-        artistId: findOrCreateArtist(db, a.name),
+      const artistInputs: SongArtistInput[] = req.artists.filter((a) => a.name.trim()).map((a, order) => ({
+        artistId: findOrCreateArtist(db, a.name.trim(), a.type),
         role: a.role,
-        order: a.order
+        order
       }))
       setSongArtists(db, id, artistInputs)
 
@@ -79,7 +85,7 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
           releaseDate: req.album.releaseDate,
           albumType: req.album.albumType,
           totalDiscs: req.album.totalDiscs,
-          label: req.album.label
+          labels: req.album.labels
         }
         // albumId 非空表示前端已明确选定/确认使用某张已有专辑（走去重确认框/改动确认框流程），否则新建
         let albumId: number
@@ -91,14 +97,12 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
         }
         setSongAlbum(db, id, albumId, req.album.discNumber, req.album.trackNumber)
 
-        // 专辑艺术家有填才覆盖；不填不动已有关联，避免同专辑后续歌曲漏填时把已有专辑艺术家清空
-        if (req.album.artists.length > 0) {
-          const albumArtistInputs: AlbumArtistInput[] = req.album.artists.map((a) => ({
-            artistId: findOrCreateArtist(db, a.name),
-            order: a.order
-          }))
-          setAlbumArtists(db, albumId, albumArtistInputs)
-        }
+        // 入库确认即视为用户确认应用当前专辑信息；空列表表示明确清空已有专辑艺术家关联。
+        const albumArtistInputs: AlbumArtistInput[] = req.album.artists.filter((a) => a.name.trim()).map((a, order) => ({
+          artistId: findOrCreateArtist(db, a.name.trim(), a.type),
+          order
+        }))
+        setAlbumArtists(db, albumId, albumArtistInputs)
       }
 
       createSongInfoOnIngest(db, id, addTime, req.firstHeardDate, req.score, req.comment)

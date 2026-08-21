@@ -3,6 +3,7 @@ import { join } from 'node:path'
 /* 给定音乐目录与系统数据目录（可分开存放，比如 .system 放本地 SSD，Music/Append 放外置硬盘），推导出各子目录的绝对路径 */
 export function libraryPaths(musicRoot: string, systemRoot: string) {
   const system = join(systemRoot, '.system')
+  const database = join(system, 'database')
   const assets = join(system, 'assets')
   return {
     musicRoot,
@@ -10,8 +11,11 @@ export function libraryPaths(musicRoot: string, systemRoot: string) {
     append: join(musicRoot, 'Append'),
     music: join(musicRoot, 'Music'),
     system,
-    dbFile: join(system, 'music.db'),
-    backups: join(system, 'backups'),
+    database,
+    dbFile: join(database, 'music.db'),
+    backups: join(database, 'backups'),
+    tools: join(system, 'tools'),
+    ncmdump: join(system, 'tools', 'ncmdump'),
     cache: join(system, 'cache'),
     cacheAudio: join(system, 'cache', 'audio'),
     cacheWaveforms: join(system, 'cache', 'waveforms'),

@@ -1,23 +1,40 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, Pencil } from 'lucide-react'
 import type {
   ArtistListItem,
+  ArtistAliasOf,
   ArtistRow,
   SongListItem,
   LabelListItem,
   LabelAlbumGroup,
-  AlbumSongItem
+  AlbumSongItem,
+  SongListSort,
+  ArtistListSort
 } from '../../../shared/types'
-import { usePlayerStore, type PlayerTrack } from '../stores/playerStore'
+import { usePlayerStore } from '../stores/playerStore'
+import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
+import { sortSongs } from '../components/SongSortControl'
+import SongListToolbarActions from '../components/SongListToolbarActions'
+import RandomPlayButton from '../components/RandomPlayButton'
+import BrowseToolbarActions from '../components/BrowseToolbarActions'
+import ArtistSortControl from '../components/ArtistSortControl'
 import SongEditModal from '../components/SongEditModal'
+import ArtistEditModal from '../components/ArtistEditModal'
 import Cover from '../components/Cover'
 import { useNavStore } from '../stores/navStore'
+import { filterArtists, filterSongs } from '../songSearch'
 
 type GridItem = ArtistListItem | LabelListItem
 
 interface Selected {
   id: number
   isLabel: boolean
+}
+
+function artistDescriptor(artist: ArtistRow | null): string | null {
+  if (!artist) return null
+  return [artist.type, artist.country].filter((value): value is string => Boolean(value)).join(' · ') || null
 }
 
 /*
@@ -29,11 +46,13 @@ export default function ArtistView(): React.JSX.Element {
   const [items, setItems] = useState<GridItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selected | null>(null)
-  const { target, clearTarget, requestReturn } = useNavStore()
+  const [sort, setSort] = useState<ArtistListSort>('name')
+  const [query, setQuery] = useState('')
+  const { target, clearTarget, navigate, openRoot, requestReturn } = useNavStore()
 
   useEffect(() => {
     Promise.all([window.api.artists.list(), window.api.artists.listLabels()]).then(([artists, labels]) => {
-      const merged = [...artists, ...labels].sort((a, b) => a.name.localeCompare(b.name))
+      const merged = [...artists, ...labels]
       setItems(merged)
       setLoading(false)
     })
@@ -48,8 +67,20 @@ export default function ArtistView(): React.JSX.Element {
 
   /* 详情页返回：若是从 Music 列表跳转过来的，跨视图返回原位置（含滚动），否则退回本视图的第一层网格 */
   function handleDetailBack(): void {
-    if (!requestReturn()) setSelected(null)
+    if (requestReturn()) return
+    setSelected(null)
+    openRoot('artist')
   }
+
+  const filteredItems = useMemo(() => filterArtists(items, query), [items, query])
+  const visibleItems = useMemo(() => {
+    /* 与 Music 页的默认库顺序一致：较晚写入数据库的记录优先。 */
+    if (sort === 'library') return [...filteredItems].sort((a, b) => b.id - a.id)
+    if (sort === 'count') {
+      return [...filteredItems].sort((a, b) => b.songCount - a.songCount || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    }
+    return [...filteredItems].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id)
+  }, [filteredItems, sort])
 
   if (selected !== null) {
     return selected.isLabel ? (
@@ -61,27 +92,35 @@ export default function ArtistView(): React.JSX.Element {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b border-white/10 backdrop-blur-xl bg-neutral-900/70">
-        <h1 className="text-lg font-medium">Artist</h1>
-        <span className="text-xs text-neutral-500">共 {items.length} 个</span>
+      <div className="library-toolbar sticky top-0 z-10 justify-between border-b border-white/[0.08]">
+        <div><h1 className="text-xl font-semibold leading-tight">Artist</h1></div>
+        <BrowseToolbarActions
+          query={query}
+          onQueryChange={setQuery}
+          placeholder="搜索艺术家或厂牌"
+          searchLabel="搜索艺术家或厂牌"
+          sortControl={<ArtistSortControl value={sort} onChange={setSort} />}
+          count={filteredItems.length}
+          countUnit="位"
+        />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-6">
         {loading ? (
           <div className="py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : items.length === 0 ? (
-          <div className="py-8 text-center text-neutral-500 text-sm">暂无艺术家</div>
+        ) : visibleItems.length === 0 ? (
+          <div className="py-8 text-center text-neutral-500 text-sm">{query ? '没有匹配的艺术家或厂牌' : '暂无艺术家'}</div>
         ) : (
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-            {items.map((item) => {
+          <div className="grid gap-x-5 gap-y-7" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(145px, 1fr))' }}>
+            {visibleItems.map((item) => {
               const isLabel = item.type === 'Label'
               return (
                 <button
                   key={item.id}
-                  onClick={() => setSelected({ id: item.id, isLabel })}
-                  className="flex flex-col items-center gap-2 text-left group transition-transform duration-150 ease-out active:scale-95"
+                  onClick={() => navigate({ view: 'artist', id: item.id, isLabel })}
+                  className="group flex flex-col items-center gap-2.5 text-left transition-transform duration-150 ease-out active:scale-[0.98]"
                 >
-                  <div className="w-full aspect-square rounded-full overflow-hidden bg-white/5">
+                  <div className="aspect-square w-full overflow-hidden rounded-full bg-white/[0.05] shadow-lg shadow-black/20 ring-1 ring-white/[0.06] transition duration-200 group-hover:ring-white/[0.18]">
                     <Cover
                       cacheKey={item.id}
                       load={() => window.api.artists.picture(item.id)}
@@ -89,7 +128,7 @@ export default function ArtistView(): React.JSX.Element {
                     />
                   </div>
                   <div className="w-full text-center">
-                    <div className="truncate text-sm group-hover:text-white">{item.name}</div>
+                    <div className="truncate text-sm font-medium text-neutral-100 group-hover:text-white">{item.name}</div>
                     <div className="truncate text-xs text-neutral-500">{item.songCount} 首</div>
                   </div>
                 </button>
@@ -110,56 +149,56 @@ interface ArtistDetailProps {
 /* 艺术家二级详情页：聚合展示该艺术家在 song_artists 表中关联的全部曲目 */
 function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Element {
   const [artist, setArtist] = useState<ArtistRow | null>(null)
+  const [aliasOf, setAliasOf] = useState<ArtistAliasOf | null>(null)
+  const [members, setMembers] = useState<ArtistRow[]>([])
   const [songs, setSongs] = useState<SongListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<SongListItem | null>(null)
+  const [editingArtist, setEditingArtist] = useState(false)
   const [pictureVersion, setPictureVersion] = useState(0)
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const { queue, currentIndex, playQueue } = usePlayerStore()
-
-  async function handleUploadPicture(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploading(true)
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      await window.api.artists.setManualPicture(artistId, bytes)
-      setPictureVersion((v) => v + 1)
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
+  const [sort, setSort] = useState<SongListSort>('library')
+  const [query, setQuery] = useState('')
+  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
 
   useEffect(() => {
     setLoading(true)
     window.api.artists.detail(artistId).then((detail) => {
       if (!detail) return
       setArtist(detail.artist)
+      setMembers(detail.members)
+      setAliasOf(detail.aliasOf)
       setSongs(detail.songs)
       setLoading(false)
     })
   }, [artistId])
 
   const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
+  const filteredSongs = useMemo(
+    () => filterSongs(songs, query, [artist?.name ?? '']),
+    [artist?.name, query, songs]
+  )
+  const sortedSongs = useMemo(() => sortSongs(filteredSongs, sort), [filteredSongs, sort])
 
   function refresh(): void {
     window.api.artists.detail(artistId).then((detail) => {
       if (!detail) return
       setArtist(detail.artist)
+      setMembers(detail.members)
+      setAliasOf(detail.aliasOf)
       setSongs(detail.songs)
     })
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 border-b border-white/10 backdrop-blur-xl bg-neutral-900/70">
+      <div className="library-toolbar sticky top-0 z-10 gap-3 border-b border-white/[0.08]">
         <button
           onClick={onBack}
-          className="text-neutral-400 hover:text-white text-sm transition-transform duration-150 ease-out active:scale-95"
+          className="library-icon-button"
+          title="返回"
+          aria-label="返回"
         >
-          ← 返回
+          <ArrowLeft size={18} />
         </button>
         <div className="w-8 h-8 rounded-full overflow-hidden bg-white/5 flex-shrink-0">
           <Cover
@@ -168,41 +207,43 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
             className="w-full h-full object-cover"
           />
         </div>
-        <h1 className="text-lg font-medium truncate">{artist?.name ?? '...'}</h1>
-        <label className="text-xs text-neutral-400 hover:text-white underline cursor-pointer">
-          {uploading ? '上传中...' : '上传头像'}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleUploadPicture}
-            disabled={uploading}
-            className="hidden"
-          />
-        </label>
-        <span className="text-xs text-neutral-500 ml-auto">共 {songs.length} 首</span>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-medium leading-tight">{artist?.name ?? '...'}</h1>
+          {(aliasOf ? `a.k.a. ${aliasOf.name}` : artistDescriptor(artist)) && (
+            <p className="truncate text-xs text-neutral-500">{aliasOf ? `a.k.a. ${aliasOf.name}` : artistDescriptor(artist)}</p>
+          )}
+        </div>
+        <button
+          onClick={() => setEditingArtist(true)}
+          className="library-icon-button"
+          title="编辑艺术家"
+          aria-label="编辑艺术家"
+        >
+          <Pencil size={16} />
+        </button>
+        <SongListToolbarActions
+          query={query}
+          onQueryChange={setQuery}
+          sort={sort}
+          onSortChange={setSort}
+          count={filteredSongs.length}
+          searchLabel="搜索当前艺术家"
+          children={<RandomPlayButton onClick={() => playRandomQueue(sortedSongs.map(toMusicPlayerTrack))} disabled={sortedSongs.length === 0} />}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
         {loading ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : songs.length === 0 ? (
+        ) : filteredSongs.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该艺术家暂无关联曲目</div>
         ) : (
           <SongList
-            songs={songs}
+            songs={sortedSongs}
             currentSongId={currentSongId}
             onPlay={(index) =>
               playQueue(
-                songs.map(
-                  (s): PlayerTrack => ({
-                    key: `music-${s.id}`,
-                    title: s.title,
-                    artistNames: s.artistNames,
-                    mediaUrl: window.api.songs.mediaUrl(s.file_name),
-                    songId: s.id
-                  })
-                ),
+                sortedSongs.map(toMusicPlayerTrack),
                 index
               )
             }
@@ -221,6 +262,22 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
           }}
         />
       )}
+
+      {editingArtist && artist && (
+        <ArtistEditModal
+          artist={artist}
+          members={members}
+          aliasOf={aliasOf}
+          onClose={() => setEditingArtist(false)}
+          onSaved={() => {
+            setEditingArtist(false)
+            setPictureVersion((v) => v + 1)
+            refresh()
+          }}
+          onDeleted={onBack}
+          onPictureChanged={() => setPictureVersion((v) => v + 1)}
+        />
+      )}
     </div>
   )
 }
@@ -236,32 +293,21 @@ interface LabelDetailProps {
  */
 function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
   const [label, setLabel] = useState<ArtistRow | null>(null)
+  const [members, setMembers] = useState<ArtistRow[]>([])
   const [groups, setGroups] = useState<LabelAlbumGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<AlbumSongItem | null>(null)
+  const [editingLabel, setEditingLabel] = useState(false)
   const [pictureVersion, setPictureVersion] = useState(0)
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const { queue, currentIndex, playQueue } = usePlayerStore()
-
-  async function handleUploadPicture(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploading(true)
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      await window.api.artists.setManualPicture(labelId, bytes)
-      setPictureVersion((v) => v + 1)
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
+  const [sort, setSort] = useState<SongListSort>('library')
+  const [query, setQuery] = useState('')
+  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
 
   function load(): void {
     window.api.artists.labelDetail(labelId).then((detail) => {
       if (!detail) return
       setLabel(detail.label)
+      setMembers(detail.members)
       setGroups(detail.groups)
       setLoading(false)
     })
@@ -274,16 +320,31 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
   }, [labelId])
 
   const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
-  const allSongs = groups.flatMap((g) => g.songs)
+  const filteredGroups = useMemo(
+    () => groups
+      .map((group) => ({
+        ...group,
+        songs: filterSongs(group.songs, query, [label?.name ?? '', group.album.title])
+      }))
+      .filter((group) => group.songs.length > 0),
+    [groups, label?.name, query]
+  )
+  const sortedGroups = useMemo(
+    () => filteredGroups.map((group) => ({ ...group, songs: sortSongs(group.songs, sort) })),
+    [filteredGroups, sort]
+  )
+  const allSongs = sortedGroups.flatMap((g) => g.songs)
 
   return (
     <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 border-b border-white/10 backdrop-blur-xl bg-neutral-900/70">
+      <div className="library-toolbar sticky top-0 z-10 gap-3 border-b border-white/[0.08]">
         <button
           onClick={onBack}
-          className="text-neutral-400 hover:text-white text-sm transition-transform duration-150 ease-out active:scale-95"
+          className="library-icon-button"
+          title="返回"
+          aria-label="返回"
         >
-          ← 返回
+          <ArrowLeft size={18} />
         </button>
         <div className="w-8 h-8 rounded-full overflow-hidden bg-white/5 flex-shrink-0">
           <Cover
@@ -292,34 +353,40 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
             className="w-full h-full object-cover"
           />
         </div>
-        <h1 className="text-lg font-medium truncate">{label?.name ?? '...'}</h1>
-        <label className="text-xs text-neutral-400 hover:text-white underline cursor-pointer">
-          {uploading ? '上传中...' : '上传头像'}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleUploadPicture}
-            disabled={uploading}
-            className="hidden"
-          />
-        </label>
-        <span className="text-xs text-neutral-500 ml-auto">
-          {groups.length} 张专辑 · 共 {allSongs.length} 首
-        </span>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-medium leading-tight">{label?.name ?? '...'}</h1>
+          {artistDescriptor(label) && <p className="truncate text-xs text-neutral-500">{artistDescriptor(label)}</p>}
+        </div>
+        <button
+          onClick={() => setEditingLabel(true)}
+          className="library-icon-button"
+          title="编辑厂牌"
+          aria-label="编辑厂牌"
+        >
+          <Pencil size={16} />
+        </button>
+        <SongListToolbarActions
+          query={query}
+          onQueryChange={setQuery}
+          sort={sort}
+          onSortChange={setSort}
+          count={allSongs.length}
+          searchLabel="搜索当前厂牌"
+          children={<RandomPlayButton onClick={() => playRandomQueue(allSongs.map(toMusicPlayerTrack))} disabled={allSongs.length === 0} />}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
         {loading ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : groups.length === 0 ? (
+        ) : sortedGroups.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该厂牌暂无关联专辑</div>
         ) : (
-          groups.map((group, gi) => {
-            const offset = groups.slice(0, gi).reduce((n, g) => n + g.songs.length, 0)
+          sortedGroups.map((group, gi) => {
+            const offset = sortedGroups.slice(0, gi).reduce((n, g) => n + g.songs.length, 0)
             return (
               <div key={group.album.id} className="mb-4">
-                <div className="sticky top-0 z-[1] px-4 py-1.5 text-xs text-neutral-400 backdrop-blur-xl bg-neutral-900/70">
+                <div className="library-subtoolbar sticky top-0 z-[1] px-4 py-1.5 text-xs text-neutral-400">
                   {group.album.title}
                   {group.album.release_date ? ` · ${group.album.release_date.slice(0, 4)}` : ''}
                 </div>
@@ -335,15 +402,7 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
                   }
                   onPlay={(index) =>
                     playQueue(
-                      allSongs.map(
-                        (s): PlayerTrack => ({
-                          key: `music-${s.id}`,
-                          title: s.title,
-                          artistNames: s.artistNames,
-                          mediaUrl: window.api.songs.mediaUrl(s.file_name),
-                          songId: s.id
-                        })
-                      ),
+                      allSongs.map(toMusicPlayerTrack),
                       offset + index
                     )
                   }
@@ -363,6 +422,22 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
             setEditingSong(null)
             load()
           }}
+        />
+      )}
+
+      {editingLabel && label && (
+        <ArtistEditModal
+          artist={label}
+          members={members}
+          allowTypeEdit={false}
+          allowManagement={false}
+          onClose={() => setEditingLabel(false)}
+          onSaved={() => {
+            setEditingLabel(false)
+            setPictureVersion((v) => v + 1)
+            load()
+          }}
+          onPictureChanged={() => setPictureVersion((v) => v + 1)}
         />
       )}
     </div>

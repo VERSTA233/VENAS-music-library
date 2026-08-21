@@ -9,7 +9,33 @@ CREATE TABLE IF NOT EXISTS artists (
     name TEXT NOT NULL,
     type TEXT CHECK(type IN ('Person', 'Group', 'Label')),
     country TEXT,
+    /* Group/Label 的有序成员 artist id，JSON number[]；空列表存 NULL。 */
     member_ids TEXT
+);
+
+/* SQLite 的 NOT NULL 接受空字符串；用触发器保护既有数据库与新建数据库，禁止空白艺术家名绕过应用层。 */
+CREATE TRIGGER IF NOT EXISTS reject_empty_artist_name_on_insert
+BEFORE INSERT ON artists
+FOR EACH ROW WHEN length(trim(NEW.name)) = 0
+BEGIN
+    SELECT RAISE(ABORT, '艺术家名称不能为空');
+END;
+
+CREATE TRIGGER IF NOT EXISTS reject_empty_artist_name_on_update
+BEFORE UPDATE OF name ON artists
+FOR EACH ROW WHEN length(trim(NEW.name)) = 0
+BEGIN
+    SELECT RAISE(ABORT, '艺术家名称不能为空');
+END;
+
+CREATE TABLE IF NOT EXISTS artist_aliases (
+    canonical_artist_id INTEGER NOT NULL,
+    alias_artist_id INTEGER NOT NULL,
+    alias_type TEXT,
+    PRIMARY KEY (canonical_artist_id, alias_artist_id),
+    UNIQUE (alias_artist_id),
+    FOREIGN KEY (canonical_artist_id) REFERENCES artists(id) ON DELETE CASCADE,
+    FOREIGN KEY (alias_artist_id) REFERENCES artists(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS albums (
@@ -18,14 +44,25 @@ CREATE TABLE IF NOT EXISTS albums (
     release_date TEXT,
     album_type TEXT,
     total_discs INTEGER,
+    /* 仅供旧数据库迁移；新代码只读写 album_labels。 */
     label_id INTEGER,
     FOREIGN KEY (label_id) REFERENCES artists(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS album_labels (
+    album_id INTEGER NOT NULL,
+    label_id INTEGER NOT NULL,
+    label_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (album_id, label_id),
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    FOREIGN KEY (label_id) REFERENCES artists(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS songs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     length INTEGER,
+    /* 旧版本 BPM 遗留列：应用层已不再读取或写入，保留以兼容已有数据库。 */
     bpm INTEGER,
     lyric TEXT,
     file_name TEXT NOT NULL UNIQUE
@@ -88,14 +125,9 @@ CREATE TABLE IF NOT EXISTS song_info (
     FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
 );
 
-/* 全部外键列补充索引，避免关联查询/级联删除时全表扫描 */
-CREATE INDEX IF NOT EXISTS idx_song_artists_song_id ON song_artists(song_id);
 CREATE INDEX IF NOT EXISTS idx_song_artists_artist_id ON song_artists(artist_id);
-CREATE INDEX IF NOT EXISTS idx_album_songs_album_id ON album_songs(album_id);
 CREATE INDEX IF NOT EXISTS idx_album_songs_song_id ON album_songs(song_id);
-CREATE INDEX IF NOT EXISTS idx_album_artists_album_id ON album_artists(album_id);
 CREATE INDEX IF NOT EXISTS idx_album_artists_artist_id ON album_artists(artist_id);
-CREATE INDEX IF NOT EXISTS idx_song_tags_song_id ON song_tags(song_id);
+CREATE INDEX IF NOT EXISTS idx_album_labels_label_id ON album_labels(label_id);
 CREATE INDEX IF NOT EXISTS idx_song_tags_tag_id ON song_tags(tag_id);
-CREATE INDEX IF NOT EXISTS idx_albums_label_id ON albums(label_id);
 `

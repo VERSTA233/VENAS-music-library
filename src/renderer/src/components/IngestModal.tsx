@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { Trash2, X } from 'lucide-react'
 import type { AppendEntry } from '../../../shared/types'
 import SongForm, { type SongFormValue } from './SongForm'
 import { useAlbumSubmitGuard } from './AlbumSubmitGuard'
+import { usePlayerStore, type PlayerTrack } from '../stores/playerStore'
 
 interface IngestModalProps {
   entry: AppendEntry
@@ -14,7 +16,6 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
   const [targetFileName, setTargetFileName] = useState(entry.fileName)
   const [form, setForm] = useState<SongFormValue>({
     title: entry.title,
-    bpm: entry.bpm != null ? String(entry.bpm) : '',
     firstHeardDate: '',
     lyric: entry.lyric ?? '',
     /* 记录当前歌词来自哪个源文件的绝对路径，入库成功后据此删除该文件；手动编辑歌词内容后仍保留，改字后依然会删除源文件 */
@@ -26,7 +27,7 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
       releaseDate: entry.releaseDate ?? '',
       albumType: 'Album',
       totalDiscs: entry.totalDiscs != null ? String(entry.totalDiscs) : '',
-      label: entry.label ?? '',
+      labels: entry.labels ?? (entry.label ? [entry.label] : []),
       discNumber: entry.discNumber != null ? String(entry.discNumber) : '',
       trackNumber: entry.trackNumber != null ? String(entry.trackNumber) : '',
       /* 专辑艺术家自动从 albumartist 字段识别，支持多艺术家（同艺术家字段一样用 / 分隔） */
@@ -35,7 +36,7 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
             .split('/')
             .map((s) => s.trim())
             .filter(Boolean)
-            .map((name, i) => ({ name, role: 'Primary', order: i }))
+            .map((name, i) => ({ name, role: 'Primary', order: i, type: 'Person' as const }))
         : [],
       // 入库时尚未经过用户显式选定，即便标题自动预填出了同名专辑，也要先走红/黄/绿灯判定
       selectedAlbumId: null,
@@ -45,22 +46,32 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
     comment: ''
   })
   const [submitting, setSubmitting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [coverWarning, setCoverWarning] = useState(false)
   const albumGuard = useAlbumSubmitGuard()
+  const hasTrack = usePlayerStore((s) => s.currentIndex !== null)
 
   useEffect(() => {
     window.api.append.parseArtists(entry.artist, entry.title).then((res) => {
+      const parsedArtists = res.artists.map((a) => ({ ...a, type: 'Person' as const }))
       setForm((prev) => ({
         ...prev,
-        artists: res.artists,
-        title: res.cleanedTitle || prev.title
+        artists: parsedArtists,
+        title: res.cleanedTitle || prev.title,
+        /*
+         * 专辑艺术家 Tag 缺失时，先用歌曲艺术家兜底填入专辑艺术家；
+         * 一旦用户从建议列表中选中已有专辑，AlbumPicker 的 applyAlbumCandidate 会用该专辑自身的艺术家整体覆盖这里的兜底值，无需在此处理已匹配到专辑的情况
+         */
+        album: entry.albumArtist
+          ? prev.album
+          : { ...prev.album, artists: parsedArtists.map((a, i) => ({ ...a, role: 'Primary', order: i })) }
       }))
     })
   }, [entry])
 
   async function handleIngest(): Promise<void> {
-    if (!form.title.trim() || !targetFileName.trim() || form.artists.length === 0) return
+    if (!form.title.trim() || !targetFileName.trim()) return
     if (/[/\\]/.test(targetFileName.trim())) {
       setError('文件名不能包含 / 或 \\')
       return
@@ -81,7 +92,6 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
         fileName: entry.fileName,
         targetFileName: targetFileName.trim(),
         title: form.title.trim(),
-        bpm: form.bpm.trim() ? Number(form.bpm) : null,
         firstHeardDate: form.firstHeardDate.trim() || null,
         lyric: form.lyric.trim() || null,
         lyricFilePath: form.lyricFilePath,
@@ -93,7 +103,7 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
               releaseDate: album.releaseDate.trim() || null,
               albumType: album.albumType || null,
               totalDiscs: album.totalDiscs.trim() ? Number(album.totalDiscs) : null,
-              label: album.label.trim() || null,
+              labels: album.labels,
               discNumber: album.discNumber.trim() ? Number(album.discNumber) : null,
               trackNumber: album.trackNumber.trim() ? Number(album.trackNumber) : null,
               artists: album.artists,
@@ -103,6 +113,25 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
         score: form.score.trim() ? Number(form.score) : null,
         comment: form.comment.trim() || null
       })
+      const storedSong = await window.api.songs.detail(result.songId)
+      const promotedTrack: PlayerTrack = storedSong
+        ? {
+            key: `music-${storedSong.id}`,
+            title: storedSong.title,
+            artistNames: storedSong.artists.map((artist) => artist.name).join(' / ') || '未知艺术家',
+            mediaUrl: window.api.songs.mediaUrl(storedSong.file_name),
+            songId: storedSong.id,
+            appendEntry: null
+          }
+        : {
+            key: `music-${result.songId}`,
+            title: form.title.trim(),
+            artistNames: form.artists.map((artist) => artist.name).join(' / ') || '未知艺术家',
+            mediaUrl: window.api.songs.mediaUrl(targetFileName.trim()),
+            songId: result.songId,
+            appendEntry: null
+          }
+      usePlayerStore.getState().promoteAppendTrack(entry.fileName, promotedTrack)
       if (result.coverCacheFailed) {
         setCoverWarning(true)
         return
@@ -115,17 +144,43 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
     }
   }
 
+  async function handleDelete(): Promise<void> {
+    setDeleting(true)
+    setError(null)
+    try {
+      await window.api.append.delete(entry.fileName)
+      usePlayerStore.getState().removeAppendTrack(entry.fileName)
+      onIngested()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-neutral-900 border border-white/10 rounded-lg w-[520px] max-h-[85vh] overflow-y-auto p-5 flex flex-col gap-4"
+        className={`modal-scroll flex w-[min(680px,calc(100vw-2rem))] flex-col gap-5 overflow-y-auto rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 p-6 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}
       >
-        <div className="flex items-center justify-between">
+        <div className="window-drag-region flex items-center justify-between">
           <h2 className="text-base font-medium">添加到音乐库</h2>
-          <button onClick={onClose} className="text-neutral-500 hover:text-white">
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={submitting || deleting}
+              className="library-icon-button text-neutral-500 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-30"
+              title="删除 Append 音频"
+              aria-label="删除 Append 音频"
+            >
+              <Trash2 size={16} />
+            </button>
+            <button type="button" onClick={onClose} className="library-icon-button" title="关闭" aria-label="关闭">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-1">
@@ -157,7 +212,7 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
           ) : (
             <button
               onClick={handleIngest}
-              disabled={submitting || !form.title.trim() || !targetFileName.trim() || form.artists.length === 0}
+              disabled={submitting || !form.title.trim() || !targetFileName.trim()}
               className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {submitting ? '入库中...' : '确认入库'}

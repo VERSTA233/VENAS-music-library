@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 
 /*
  * 入库时创建 song_info 占位记录：song_id / add_time 必有值，first_heard_date 由用户在表单中手动登记（可留空），其余字段为 NULL。
- * add_time 记录的是音频文件本身的创建时间（由调用方从文件系统读取后传入），而不是执行入库操作的时刻，
+ * add_time 记录的是音频文件本身的修改时间（由调用方从文件系统读取后传入），而不是执行入库操作的时刻，
  * 这样即便某首歌很久之后才被整理进音乐库，add_time 依然反映它实际"到手"的时间。
  */
 export function createSongInfoOnIngest(

@@ -1,5 +1,5 @@
 import { readdirSync, statSync, existsSync, readFileSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { parseFile, type IAudioMetadata } from 'music-metadata'
 import type { LibraryPaths } from './paths'
 import type { AppendEntry } from '../../shared/types'
@@ -87,10 +87,8 @@ export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry
         album: meta.common.album ?? null,
         /* 专辑艺术家来自 albumartist 字段本身，与上面的主艺术家字段来源不同，不做互相推断 */
         albumArtist: meta.common.albumartist ?? null,
-        /* label 字段 music-metadata 解析为数组（少数格式可能写多个厂牌标签），取第一个 */
-        label: meta.common.label?.[0] ?? null,
-        /* bpm 部分标签存的是浮点数（如 127.5），入库表单只接受整数，这里四舍五入 */
-        bpm: meta.common.bpm != null ? Math.round(meta.common.bpm) : null,
+        /* music-metadata 原生返回厂牌数组，完整保留并去除空白项。 */
+        labels: [...new Set((meta.common.label ?? []).map((label) => label.trim()).filter(Boolean))],
         lyric,
         lyricFilePath,
         releaseDate: extractReleaseDate(meta),
@@ -108,8 +106,7 @@ export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry
         artist: null,
         album: null,
         albumArtist: null,
-        label: null,
-        bpm: null,
+        labels: [],
         lyric,
         lyricFilePath,
         releaseDate: null,
@@ -126,6 +123,7 @@ export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry
 
 /* 获取某个 Append 文件内嵌的封面图片二进制数据（用于前端展示预览） */
 export async function getAppendCover(paths: LibraryPaths, fileName: string): Promise<Buffer | null> {
+  if (!fileName || basename(fileName) !== fileName || /[/\\]/.test(fileName)) return null
   const full = join(paths.append, fileName)
   const meta = await parseFile(full)
   const pic = meta.common.picture?.[0]

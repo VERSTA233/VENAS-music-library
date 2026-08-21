@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, dialog, protocol } from 'electron'
-import { join, extname } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { createReadStream, statSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -8,6 +8,7 @@ import { initLibrary } from './library/init'
 import { runDailyBackup } from './library/backup'
 import { registerIpcHandlers } from './ipc'
 import type { LibraryPaths } from './library/paths'
+import { resolveMigratedAppendSource, resolveMigratedMusicSource } from './library/migratedAppendSources'
 
 let libraryPaths: LibraryPaths | null = null
 
@@ -29,7 +30,9 @@ function createWindow(): void {
     height: 800,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#0b0b0f',
+    /* 让 Web 内容延伸到交通灯区域，标题栏与侧栏/内容区使用同一套深色材质。 */
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#0e0e10',
     webPreferences: {
       /* package.json 为 "type": "module"，electron-vite 会把 preload 输出为 .mjs，扩展名必须对上 */
       preload: join(__dirname, '../preload/index.mjs'),
@@ -63,12 +66,44 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
   '.ape': 'audio/x-ape'
 }
 
+/* 音频请求在切歌或拖动时可能被 Chromium 取消；显式销毁文件流，避免已取消请求继续占用文件描述符。 */
+function streamForRequest(request: Request, filePath: string, options?: { start: number; end: number }): ReadableStream {
+  const nodeStream = createReadStream(filePath, options)
+  const abortStream = () => nodeStream.destroy()
+  if (request.signal.aborted) abortStream()
+  else request.signal.addEventListener('abort', abortStream, { once: true })
+  nodeStream.once('close', () => request.signal.removeEventListener('abort', abortStream))
+  return Readable.toWeb(nodeStream) as ReadableStream
+}
+
 /* 注册 venas-media:// 协议：host 区分 music/append 两个子目录，路径部分是 URL 编码后的文件名（不含子目录层级） */
 function registerMediaProtocol(paths: LibraryPaths): void {
   protocol.handle('venas-media', async (request) => {
     const url = new URL(request.url)
-    const base = url.hostname === 'append' ? paths.append : paths.music
-    const fileName = decodeURIComponent(url.pathname.replace(/^\//, ''))
+    if (url.hostname !== 'music' && url.hostname !== 'append') return new Response(null, { status: 404 })
+
+    let requestedFileName: string
+    try {
+      requestedFileName = decodeURIComponent(url.pathname.replace(/^\//, ''))
+    } catch {
+      return new Response(null, { status: 400 })
+    }
+    if (
+      !requestedFileName ||
+      requestedFileName === '.' ||
+      requestedFileName === '..' ||
+      basename(requestedFileName) !== requestedFileName ||
+      /[/\\]/.test(requestedFileName)
+    ) {
+      return new Response(null, { status: 400 })
+    }
+    const migratedFileName = url.hostname === 'append' ? resolveMigratedAppendSource(requestedFileName) : null
+    const renamedMusicFileName = url.hostname === 'music' ? resolveMigratedMusicSource(requestedFileName) : null
+    const base = url.hostname === 'append' && !migratedFileName ? paths.append : paths.music
+    const fileName = migratedFileName ?? renamedMusicFileName ?? requestedFileName
+    if (!fileName || basename(fileName) !== fileName || /[/\\]/.test(fileName)) {
+      return new Response(null, { status: 404 })
+    }
     const filePath = join(base, fileName)
     const mimeType = AUDIO_MIME_TYPES[extname(fileName).toLowerCase()] ?? 'application/octet-stream'
 
@@ -82,7 +117,7 @@ function registerMediaProtocol(paths: LibraryPaths): void {
     const rangeHeader = request.headers.get('range')
     if (!rangeHeader) {
       // 没有 Range 头（比如首次加载探测 duration）：返回整个文件
-      const stream = Readable.toWeb(createReadStream(filePath)) as ReadableStream
+      const stream = streamForRequest(request, filePath)
       return new Response(stream, {
         status: 200,
         headers: { 'Content-Type': mimeType, 'Content-Length': String(fileSize), 'Accept-Ranges': 'bytes' }
@@ -100,7 +135,7 @@ function registerMediaProtocol(paths: LibraryPaths): void {
       return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${fileSize}` } })
     }
 
-    const stream = Readable.toWeb(createReadStream(filePath, { start, end })) as ReadableStream
+    const stream = streamForRequest(request, filePath, { start, end })
     return new Response(stream, {
       status: 206,
       headers: {

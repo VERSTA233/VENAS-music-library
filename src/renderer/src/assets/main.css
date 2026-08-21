@@ -3,7 +3,235 @@
 /* 全局暗色基调，跟主进程窗口背景色 #0b0b0f 保持一致 */
 body {
   margin: 0;
-  background-color: #0b0b0f;
-  color: #e5e5e5;
+  background-color: #0e0e10;
+  color: #f4f4f5;
   font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  font-optical-sizing: auto;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 所有可滚动区域采用同一套深色、低干扰的滚动条。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.36);
+  background-clip: padding-box;
+}
+
+.library-toolbar,
+.library-subtoolbar,
+.library-footer {
+  background: rgba(20, 20, 23, 0.76);
+  backdrop-filter: blur(22px) saturate(145%);
+}
+
+/* 所有右侧主视图共用固定高度的顶栏；无论标题是一行还是两行，控件都在同一基线区域内居中。 */
+.library-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  height: 4.5rem;
+  min-height: 4.5rem;
+  align-items: center;
+  padding: 0 1.5rem;
+  -webkit-app-region: drag;
+}
+
+/* 隐藏式原生标题栏下，顶栏空白处可拖动窗口；交互控件必须显式退出拖拽区。 */
+.window-drag-region {
+  -webkit-app-region: drag;
+}
+
+.library-toolbar button,
+.library-toolbar input,
+.library-toolbar select,
+.library-toolbar textarea,
+.window-drag-region button,
+.window-drag-region input,
+.window-drag-region select,
+.window-drag-region textarea {
+  -webkit-app-region: no-drag;
+}
+
+/* 隐藏式标题栏会接管顶部命中；弹窗与系统标题栏保持安全距离，关闭按钮不会落入不可点击区域。 */
+.modal-safe-area {
+  padding-top: 3rem;
+  -webkit-app-region: no-drag;
+}
+
+.library-row {
+  transition: background-color 160ms ease-out, transform 100ms ease-out;
+}
+
+.library-row:active {
+  transform: scale(0.995);
+}
+
+.library-icon-button {
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: #a1a1aa;
+  transition: background-color 160ms ease-out, color 160ms ease-out, transform 100ms ease-out;
+}
+
+.library-icon-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.library-icon-button:active {
+  transform: scale(0.94);
+}
+
+/* 播放进度使用淡色未播放轨道与圆角矩形滑块，避免浏览器默认的描边外观。 */
+.player-progress {
+  appearance: none;
+  height: 1rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.player-progress::-webkit-slider-runnable-track {
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.92) 0 var(--progress), rgba(255, 255, 255, 0.22) var(--progress) 100%);
+}
+
+.player-progress::-webkit-slider-thumb {
+  appearance: none;
+  width: 1.125rem;
+  height: 0.625rem;
+  margin-top: -0.1875rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.player-progress::-moz-range-track {
+  height: 0.25rem;
+  border: 0;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.player-progress::-moz-range-progress {
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.player-progress::-moz-range-thumb {
+  width: 1.125rem;
+  height: 0.625rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.modal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scrollbar-gutter: stable;
+}
+
+.modal-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+}
+
+.modal-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.36);
+  background-clip: padding-box;
+}
+
+main,
+main * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+main ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+main ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+main ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+}
+
+main ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.36);
+  background-clip: padding-box;
+}
+
+/* 播放器是沉浸式控制面，键盘焦点不显示浏览器默认的高亮描边。 */
+button:focus,
+button:focus-visible,
+input:focus,
+input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop-blur-xl,
+  .backdrop-blur-2xl,
+  .library-toolbar,
+  .library-subtoolbar,
+  .library-footer {
+    backdrop-filter: none;
+    background: #171719;
+  }
 }
