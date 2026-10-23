@@ -48,15 +48,12 @@ export async function updateSongCover(
   opts: { manual?: boolean } = {}
 ): Promise<void> {
   const album = getSongAlbum(db, songId)
+  const target = album ? albumPicturePath(paths, album.id) : songPicturePath(paths, songId)
+  if (album && !opts.manual && existsSync(target)) return
   const buffer = await compressCover(imageData)
-
-  if (album) {
-    const target = albumPicturePath(paths, album.id)
-    if (!opts.manual && existsSync(target)) return
-    writeFileSync(target, buffer)
-  } else {
-    writeFileSync(songPicturePath(paths, songId), buffer)
-  }
+  /* 压缩期间其他入库任务可能已写入专辑封面，再检查一次以保留先写入的封面。 */
+  if (album && !opts.manual && existsSync(target)) return
+  writeFileSync(target, buffer)
 }
 
 /*

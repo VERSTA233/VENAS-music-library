@@ -6,6 +6,7 @@ import ReloadAudioPanel from './ReloadAudioPanel'
 import { useAlbumSubmitGuard } from './AlbumSubmitGuard'
 import { useNavStore, type NavTarget, type ReturnContext } from '../stores/navStore'
 import { usePlayerStore } from '../stores/playerStore'
+import { useLibraryStore } from '../stores/libraryStore'
 
 interface SongEditModalProps {
   songId: number
@@ -187,6 +188,7 @@ export default function SongEditModal({
         comment: form.comment.trim() || null
       })
       usePlayerStore.getState().updateSongFile(songId, result.fileName, result.audioReplaced)
+      useLibraryStore.getState().invalidateSongs()
       onSaved()
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : String(reason))
@@ -200,6 +202,7 @@ export default function SongEditModal({
     try {
       await window.api.songs.delete(songId)
       usePlayerStore.getState().removeSong(songId)
+      useLibraryStore.getState().invalidateSongs()
       onSaved()
       onClose()
     } finally {
@@ -219,7 +222,7 @@ export default function SongEditModal({
     <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}
+        className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}
       >
         <div className="window-drag-region flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
           <h2 className="text-base font-semibold text-white">{editing ? '编辑歌曲信息' : '歌曲信息'}</h2>
@@ -251,7 +254,7 @@ export default function SongEditModal({
 
             <div className="border-t border-white/10 pt-3">
               <button onClick={() => setShowReload((v) => !v)} className="text-xs text-neutral-400 hover:text-white">
-                {showReload ? '收起 ▲' : '重载音频文件 ▼'}
+                {showReload ? '收起 ▲' : '重载音频文件/封面 ▼'}
               </button>
               {showReload && (
                 <ReloadAudioPanel

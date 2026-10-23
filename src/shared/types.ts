@@ -33,6 +33,12 @@ export interface NeteaseImportResult {
   failedFiles: { fileName: string; message: string }[]
 }
 
+/* 应用音量独立于播放会话保存；静音时保留原音量。 */
+export interface PlaybackVolume {
+  volume: number
+  muted: boolean
+}
+
 /* 应用重启后恢复到底部播放器的会话；mediaUrl 是已注册的 venas-media 协议地址，可直接继续使用。 */
 export interface PlaybackSession {
   queue: {
@@ -42,6 +48,7 @@ export interface PlaybackSession {
     mediaUrl: string
     songId: number | null
     appendEntry: AppendEntry | null
+    contentVersion?: string
   }[]
   currentIndex: number
   currentTime: number
@@ -88,6 +95,28 @@ export interface OrphanPictureFiles {
   artist: string[]
   song: string[]
   album: string[]
+}
+
+export interface AlbumWithoutSongs {
+  albumId: number
+  title: string
+}
+
+export interface ArtistWithoutSongs {
+  artistId: number
+  name: string
+  type: string | null
+}
+
+export interface EmptyRecordCleanupResult {
+  deletedIds: number[]
+  skippedIds: number[]
+  warnings: string[]
+}
+
+export interface DuplicateArtistNameGroup {
+  name: string
+  records: { artistId: number; name: string; type: string | null }[]
 }
 
 export interface ParsedArtist {
@@ -184,6 +213,8 @@ export interface SongListItem {
 }
 
 export type SongListSort = 'library' | 'title' | 'addedAt'
+
+export type SortDirection = 'asc' | 'desc'
 
 export interface AlbumLabel {
   id: number
@@ -357,4 +388,20 @@ export interface LabelListItem extends ArtistRow {
 export interface LabelAlbumGroup {
   album: AlbumRow
   songs: AlbumSongItem[]
+}
+
+/* 系统目录迁移状态，复制和校验分别报告已完成文件数。 */
+export interface LibraryMaintenanceState {
+  phase: 'waiting' | 'copying' | 'verifying' | 'finishing'
+  completed: number
+  total: number
+}
+
+/* 解码前估算内存，version 用于检测读取期间的文件替换。 */
+export interface PlaybackFileInfo {
+  duration: number | null
+  sampleRate: number | null
+  channels: number | null
+  size: number
+  version: string
 }

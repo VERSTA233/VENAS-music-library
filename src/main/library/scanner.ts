@@ -77,7 +77,8 @@ export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry
     /* 歌词文件与解析音频元数据无关，两者失败互不影响，放在 try 外单独取 */
     const { lyric, lyricFilePath } = findMatchingLyricFile(paths, fileName)
     try {
-      const meta = await parseFile(full)
+      /* OGG 的时长依赖末页采样位置，必须显式要求解析到文件末尾。 */
+      const meta = await parseFile(full, { duration: true })
       results.push({
         fileName,
         title: meta.common.title ?? fileName.replace(extname(fileName), ''),

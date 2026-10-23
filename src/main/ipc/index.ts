@@ -1,7 +1,10 @@
-import { ipcMain, app, dialog } from 'electron'
+import { ipcMain, app, dialog, BrowserWindow } from 'electron'
+import { rm, realpath } from 'node:fs/promises'
+import { LibraryMaintenance } from '../library/maintenance'
+import { inspectPlaybackFile } from '../library/playbackInfo'
 import { execFile } from 'node:child_process'
-import { readFileSync, existsSync, rmSync, unlinkSync } from 'node:fs'
-import { basename, join, relative, isAbsolute, resolve } from 'node:path'
+import { readFileSync, existsSync, unlinkSync } from 'node:fs'
+import { basename, join, relative, isAbsolute } from 'node:path'
 import { parseFile } from 'music-metadata'
 import type { LibraryPaths } from '../library/paths'
 import { settings } from '../settings'
@@ -9,14 +12,30 @@ import { getDatabase, closeDatabase, openDatabase } from '../db'
 import { scanAppendFolder, getAppendCover } from '../library/scanner'
 import { parseArtists, mergeParsedArtists } from '../library/artistParser'
 import { ingestSong, type IngestRequest } from '../library/ingest'
-import { reloadAudioFile, setManualCover } from '../library/reload'
+import { reloadAudioFile, reloadEmbeddedCover, setManualCover } from '../library/reload'
 import { moveSongPictureToAlbum, updateSongCover, writeAlbumPicture, writeArtistPicture } from '../library/coverCache'
-import { findMissingAudioFiles, findMissingSongCovers, findOrphanPictureFiles } from '../library/health'
+import {
+  findAlbumsWithoutSongs,
+  findArtistsWithoutSongs,
+  findDuplicateArtistNames,
+  findMissingAudioFiles,
+  repairMissingSongCovers,
+  findOrphanPictureFiles
+} from '../library/health'
 import { deleteLibrarySong } from '../library/deleteSong'
+import { cleanEmptyLibraryRecords } from '../library/healthCleanup'
 import { copyAndVerifySystemDirectory } from '../library/systemMigration'
 import { recordMigratedAppendSource } from '../library/migratedAppendSources'
 import { importNeteaseMusic } from '../library/neteaseImport'
 import { deleteLibraryArtist, mergeLibraryArtist } from '../library/artistMaintenance'
+import {
+  addAlbumOrphanCandidates,
+  addSongOrphanCandidates,
+  cleanupOrphanCandidates,
+  createOrphanCandidates,
+  removeOrphanPictures,
+  type OrphanCleanupResult
+} from '../library/orphanCleanup'
 import {
   listSongs,
   countSongs,
@@ -72,26 +91,37 @@ import {
 } from '../db/queries/tags'
 import { listLabels, getLabelById, getLabelAlbumGroups } from '../db/queries/labels'
 import { touchLastHeard, setFirstHeardDate, setScoreAndComment } from '../db/queries/songInfo'
-import type { SongUpdateData, ArtistAliasType, ArtistUpdateData, AlbumUpdateData, PlaybackSession, NavigationSession, SongListSort, MusicRootInspection, TagUpdateData } from '../../shared/types'
+import type { SongUpdateData, ArtistAliasType, ArtistUpdateData, AlbumUpdateData, PlaybackSession, NavigationSession, SongListSort, SortDirection, MusicRootInspection, TagUpdateData } from '../../shared/types'
 
 /* 注册全部 IPC handler，供 preload 暴露给渲染进程调用 */
 export function registerIpcHandlers(paths: LibraryPaths): void {
+  const maintenance = new LibraryMaintenance((state) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send('library:maintenance', state)
+    }
+  })
+  const handle: typeof ipcMain.handle = (channel, listener) => {
+    ipcMain.handle(channel, (event, ...args) => maintenance.run(() => listener(event, ...args)))
+  }
+  ipcMain.handle('library:getMaintenanceState', () => maintenance.state)
+  let choosingSystemRoot = false
+
   /* ---- Append ---- */
-  ipcMain.handle('append:scan', () => scanAppendFolder(paths))
-  ipcMain.handle('append:cover', (_e, fileName: string) => getAppendCover(paths, fileName))
-  ipcMain.handle('append:parseArtists', (_e, artistField: string | null, titleField: string | null) => {
+  handle('append:scan', () => scanAppendFolder(paths))
+  handle('append:cover', (_e, fileName: string) => getAppendCover(paths, fileName))
+  handle('append:parseArtists', (_e, artistField: string | null, titleField: string | null) => {
     const fromArtist = parseArtists(artistField)
     /* 曲名字段只用来提取 feat. 艺术家，剩余文本不当作 Primary 艺术家（否则曲名本身会被误判为艺术家） */
     const fromTitle = parseArtists(titleField, false)
     const merged = mergeParsedArtists(fromArtist.artists, fromTitle.artists)
     return { artists: merged, cleanedTitle: fromTitle.cleanedText || null }
   })
-  ipcMain.handle('append:ingest', async (_e, req: IngestRequest) => {
+  handle('append:ingest', async (_e, req: IngestRequest) => {
     const result = await ingestSong(paths, req)
     recordMigratedAppendSource(req.fileName, req.targetFileName)
     return result
   })
-  ipcMain.handle('append:delete', (_e, fileName: string) => {
+  handle('append:delete', (_e, fileName: string) => {
     const filePath = join(paths.append, fileName)
     const relativePath = relative(paths.append, filePath)
     if (basename(fileName) !== fileName || isAbsolute(relativePath) || relativePath.startsWith('..')) {
@@ -100,8 +130,8 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     /* 文件已被移动或手动删除时视为目标已达成，让编辑窗正常关闭。 */
     if (existsSync(filePath)) unlinkSync(filePath)
   })
-  ipcMain.handle('append:importNeteaseMusic', () => importNeteaseMusic(paths, settings.get('neteaseMusicRoot')))
-  ipcMain.handle('append:pickLyricFile', async () => {
+  handle('append:importNeteaseMusic', () => importNeteaseMusic(paths, settings.get('neteaseMusicRoot')))
+  handle('append:pickLyricFile', async () => {
     /* 允许选任意位置的 .lrc 文件，入库成功后会删除用户选中的这个源文件（不限于 Append 目录） */
     const result = await dialog.showOpenDialog({
       title: '选择歌词文件',
@@ -115,15 +145,19 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   })
 
   /* ---- Songs (Music library) ---- */
-  ipcMain.handle('songs:list', (_e, sort: SongListSort = 'library', query = '') => {
+  handle('songs:list', (_e, sort: SongListSort = 'library', query = '', direction: SortDirection = 'desc') => {
     const db = getDatabase()
-    return { items: listSongs(db, sort, query), total: countSongs(db, query) }
+    return { items: listSongs(db, sort, query, direction), total: countSongs(db, query) }
   })
-  ipcMain.handle('songs:detail', (_e, songId: number) => getSongDetail(getDatabase(), songId))
-  ipcMain.handle('songs:delete', (_e, songId: number) => deleteLibrarySong(paths, getDatabase(), songId))
-  ipcMain.handle('songs:update', async (_e, songId: number, data: SongUpdateData) => {
+  handle('songs:detail', (_e, songId: number) => getSongDetail(getDatabase(), songId))
+  handle('songs:delete', (_e, songId: number) => deleteLibrarySong(paths, getDatabase(), songId))
+  handle('songs:update', async (_e, songId: number, data: SongUpdateData) => {
     const db = getDatabase()
     const hadAlbum = getSongAlbum(db, songId) != null
+    const orphanCandidates = createOrphanCandidates()
+    addSongOrphanCandidates(db, orphanCandidates, songId)
+    if (data.album?.albumId != null) addAlbumOrphanCandidates(db, orphanCandidates, data.album.albumId)
+    let cleanupResult: OrphanCleanupResult = { albumIds: [], artistIds: [] }
 
     const updateMetadata = (): void => {
       updateSongFields(db, songId, { title: data.title, lyric: data.lyric })
@@ -164,10 +198,12 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
       } else {
         removeSongAlbum(db, songId)
       }
+      cleanupResult = cleanupOrphanCandidates(db, orphanCandidates)
     }
 
     /* 文件重命名/替换与其余歌曲信息共用一个数据库事务，文件操作失败时恢复原路径。 */
     const audioResult = await reloadAudioFile(paths, songId, data.replacementFilePath, data.fileName, updateMetadata)
+    removeOrphanPictures(paths, cleanupResult)
 
     // 原本无专辑、这次新加入某张专辑：把它的独立封面迁移为该专辑的封面（专辑已有封面则丢弃这份）
     if (!hadAlbum && data.album?.title.trim()) {
@@ -185,7 +221,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     }
     return audioResult
   })
-  ipcMain.handle('songs:pickReloadFile', async () => {
+  handle('songs:pickReloadFile', async () => {
     const result = await dialog.showOpenDialog({
       title: '选择用于重载的音频文件',
       defaultPath: paths.music,
@@ -196,11 +232,12 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     const filePath = result.filePaths[0]
     return { filePath, fileName: basename(filePath) }
   })
-  ipcMain.handle('songs:setManualCover', (_e, songId: number, imageData: Uint8Array) =>
+  handle('songs:setManualCover', (_e, songId: number, imageData: Uint8Array) =>
     /* 渲染进程传来的是 Uint8Array，这里统一转成 Buffer 供 sharp 处理 */
     setManualCover(paths, songId, Buffer.from(imageData))
   )
-  ipcMain.handle('songs:cover', (_e, songId: number) => {
+  handle('songs:reloadEmbeddedCover', (_e, songId: number) => reloadEmbeddedCover(paths, songId))
+  handle('songs:cover', (_e, songId: number) => {
     // 歌曲属于专辑则封面是专辑封面，否则是歌曲独立封面，两套目录二选一读取
     const db = getDatabase()
     const album = getSongAlbum(db, songId)
@@ -210,7 +247,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     return existsSync(coverPath) ? readFileSync(coverPath) : null
   })
   /* 播放时优先读取音频内嵌封面；首次发现封面时同步建立缓存，供列表及后续播放复用。 */
-  ipcMain.handle('songs:embeddedCover', async (_e, songId: number) => {
+  handle('songs:embeddedCover', async (_e, songId: number) => {
     const db = getDatabase()
     const song = getSongDetail(db, songId)
     if (!song) return null
@@ -240,19 +277,19 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   })
 
   /* ---- Artists ---- */
-  ipcMain.handle('artists:search', (_e, query: string) => searchArtists(getDatabase(), query))
-  ipcMain.handle('artists:searchLabels', (_e, query: string) => searchLabels(getDatabase(), query))
+  handle('artists:search', (_e, query: string) => searchArtists(getDatabase(), query))
+  handle('artists:searchLabels', (_e, query: string) => searchLabels(getDatabase(), query))
   /* 精确匹配（忽略大小写）：供艺术家编辑器判断某个名字入库时是"关联已有"还是"新建"，用于绿/红指示 */
-  ipcMain.handle('artists:matchExact', (_e, name: string) => findArtistByName(getDatabase(), name) !== null)
-  ipcMain.handle('artists:matchLabelExact', (_e, name: string) => findLabelByName(getDatabase(), name) !== null)
-  ipcMain.handle('artists:list', () => listArtists(getDatabase()))
-  ipcMain.handle('artists:detail', (_e, artistId: number) => {
+  handle('artists:matchExact', (_e, name: string) => findArtistByName(getDatabase(), name) !== null)
+  handle('artists:matchLabelExact', (_e, name: string) => findLabelByName(getDatabase(), name) !== null)
+  handle('artists:list', () => listArtists(getDatabase()))
+  handle('artists:detail', (_e, artistId: number) => {
     const db = getDatabase()
     const artist = getArtistById(db, artistId)
     if (!artist) return null
     return { artist, members: getArtistMembers(db, artistId), aliasOf: getArtistAliasOf(db, artistId), songs: getArtistSongs(db, artistId) }
   })
-  ipcMain.handle('artists:picture', (_e, artistId: number) => {
+  handle('artists:picture', (_e, artistId: number) => {
     const picturePath = join(paths.assetsArtistPictures, `${artistId}.jpg`)
     if (existsSync(picturePath)) return readFileSync(picturePath)
 
@@ -271,23 +308,23 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
 
     return null
   })
-  ipcMain.handle('artists:setManualPicture', (_e, artistId: number, imageData: Uint8Array) =>
+  handle('artists:setManualPicture', (_e, artistId: number, imageData: Uint8Array) =>
     writeArtistPicture(paths, artistId, Buffer.from(imageData))
   )
-  ipcMain.handle('artists:update', (_e, artistId: number, data: ArtistUpdateData) =>
+  handle('artists:update', (_e, artistId: number, data: ArtistUpdateData) =>
     updateArtistInfo(getDatabase(), artistId, data.name, data.type, data.country, data.memberIds ?? [])
   )
-  ipcMain.handle('artists:delete', (_e, artistId: number) =>
+  handle('artists:delete', (_e, artistId: number) =>
     deleteLibraryArtist(paths, getDatabase(), artistId)
   )
-  ipcMain.handle('artists:merge', (_e, sourceArtistId: number, targetArtistId: number) =>
+  handle('artists:merge', (_e, sourceArtistId: number, targetArtistId: number) =>
     mergeLibraryArtist(paths, getDatabase(), sourceArtistId, targetArtistId)
   )
-  ipcMain.handle('artists:setAlias', (_e, aliasArtistId: number, canonicalArtistId: number, aliasType: ArtistAliasType) =>
+  handle('artists:setAlias', (_e, aliasArtistId: number, canonicalArtistId: number, aliasType: ArtistAliasType) =>
     setArtistAlias(getDatabase(), aliasArtistId, canonicalArtistId, aliasType)
   )
-  ipcMain.handle('artists:listLabels', () => listLabels(getDatabase()))
-  ipcMain.handle('artists:labelDetail', (_e, labelId: number) => {
+  handle('artists:listLabels', () => listLabels(getDatabase()))
+  handle('artists:labelDetail', (_e, labelId: number) => {
     const db = getDatabase()
     const label = getLabelById(db, labelId)
     if (!label) return null
@@ -295,10 +332,13 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   })
 
   /* ---- Albums ---- */
-  ipcMain.handle('albums:search', (_e, query: string) => searchAlbums(getDatabase(), query))
-  ipcMain.handle('albums:list', () => listAlbums(getDatabase()))
-  ipcMain.handle('albums:update', (_e, albumId: number, data: AlbumUpdateData) => {
+  handle('albums:search', (_e, query: string) => searchAlbums(getDatabase(), query))
+  handle('albums:list', () => listAlbums(getDatabase()))
+  handle('albums:update', (_e, albumId: number, data: AlbumUpdateData) => {
     const db = getDatabase()
+    const orphanCandidates = createOrphanCandidates()
+    addAlbumOrphanCandidates(db, orphanCandidates, albumId)
+    let cleanupResult: OrphanCleanupResult = { albumIds: [], artistIds: [] }
     db.transaction(() => {
       updateAlbumFields(db, albumId, data)
       const albumArtistInputs: AlbumArtistInput[] = data.artists
@@ -308,70 +348,88 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
           order
         }))
       setAlbumArtists(db, albumId, albumArtistInputs)
+      cleanupResult = cleanupOrphanCandidates(db, orphanCandidates)
     })()
+    removeOrphanPictures(paths, cleanupResult)
   })
-  ipcMain.handle('albums:setManualCover', (_e, albumId: number, imageData: Uint8Array) =>
+  handle('albums:setManualCover', (_e, albumId: number, imageData: Uint8Array) =>
     writeAlbumPicture(paths, albumId, Buffer.from(imageData))
   )
-  ipcMain.handle('albums:detail', (_e, albumId: number) => {
+  handle('albums:detail', (_e, albumId: number) => {
     const db = getDatabase()
     const album = getAlbumById(db, albumId)
     if (!album) return null
     return { album, songs: getAlbumSongs(db, albumId), artists: getAlbumArtists(db, albumId) }
   })
-  ipcMain.handle('albums:cover', (_e, albumId: number) => {
+  handle('albums:cover', (_e, albumId: number) => {
     const coverPath = join(paths.assetsAlbumPictures, `${albumId}.jpg`)
     return existsSync(coverPath) ? readFileSync(coverPath) : null
   })
 
   /* ---- Tags ---- */
-  ipcMain.handle('tags:search', (_e, query: string) => searchTags(getDatabase(), query))
-  ipcMain.handle('tags:create', (_e, name: string, tagType: string) => createTag(getDatabase(), name, tagType))
-  ipcMain.handle('tags:listTypes', () => listTagTypes(getDatabase()))
-  ipcMain.handle('tags:listByType', (_e, tagType: string) => listTagsByType(getDatabase(), tagType))
-  ipcMain.handle('tags:detail', (_e, tagId: number) => {
+  handle('tags:search', (_e, query: string) => searchTags(getDatabase(), query))
+  handle('tags:create', (_e, name: string, tagType: string) => createTag(getDatabase(), name, tagType))
+  handle('tags:listTypes', () => listTagTypes(getDatabase()))
+  handle('tags:listByType', (_e, tagType: string) => listTagsByType(getDatabase(), tagType))
+  handle('tags:detail', (_e, tagId: number) => {
     const db = getDatabase()
     const tag = getTagById(db, tagId)
     if (!tag) return null
     return { tag, songs: getTagSongs(db, tagId) }
   })
-  ipcMain.handle('tags:removeSong', (_e, tagId: number, songId: number) =>
+  handle('tags:removeSong', (_e, tagId: number, songId: number) =>
     removeSongFromTag(getDatabase(), tagId, songId)
   )
-  ipcMain.handle('tags:setSongComment', (_e, tagId: number, songId: number, comment: string | null) =>
+  handle('tags:setSongComment', (_e, tagId: number, songId: number, comment: string | null) =>
     setSongTagComment(getDatabase(), tagId, songId, comment)
   )
-  ipcMain.handle('tags:setSongOrder', (_e, tagId: number, songIds: number[]) =>
+  handle('tags:setSongOrder', (_e, tagId: number, songIds: number[]) =>
     setTagSongOrder(getDatabase(), tagId, songIds)
   )
-  ipcMain.handle('tags:updateType', (_e, tagId: number, tagType: string | null) =>
+  handle('tags:updateType', (_e, tagId: number, tagType: string | null) =>
     updateTagType(getDatabase(), tagId, tagType)
   )
-  ipcMain.handle('tags:update', (_e, tagId: number, data: TagUpdateData) =>
+  handle('tags:update', (_e, tagId: number, data: TagUpdateData) =>
     updateTag(getDatabase(), tagId, data.name, data.tagType)
   )
-  ipcMain.handle('tags:delete', (_e, tagId: number) => deleteTag(getDatabase(), tagId))
+  handle('tags:delete', (_e, tagId: number) => deleteTag(getDatabase(), tagId))
 
   /* ---- Playback ---- */
-  ipcMain.handle('playback:touchLastHeard', (_e, songId: number) => touchLastHeard(getDatabase(), songId))
-  ipcMain.handle('playback:getSession', () => settings.get('playbackSession'))
-  ipcMain.handle('playback:saveSession', (_e, session: PlaybackSession | null) => settings.set('playbackSession', session))
+  handle('playback:getVolume', () => settings.get('playbackVolume'))
+  handle('playback:setVolume', (_e, value: { volume: number; muted: boolean }) => {
+    if (!value || !Number.isFinite(value.volume) || value.volume < 0 || value.volume > 1 || typeof value.muted !== 'boolean') throw new Error('音量设置无效')
+    settings.set('playbackVolume', { volume: value.volume, muted: value.muted })
+  })
+  handle('playback:inspectFile', (_e, mediaUrl: string) => inspectPlaybackFile(paths, mediaUrl))
+  handle('playback:getGapless', () => settings.get('gaplessEnabled'))
+  handle('playback:setGapless', (_e, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') throw new Error('无缝播放设置无效')
+    settings.set('gaplessEnabled', enabled)
+  })
+  handle('playback:touchLastHeard', (_e, songId: number) => touchLastHeard(getDatabase(), songId))
+  handle('playback:getSession', () => settings.get('playbackSession'))
+  handle('playback:saveSession', (_e, session: PlaybackSession | null) => settings.set('playbackSession', session))
 
   /* ---- Navigation ---- */
-  ipcMain.handle('navigation:getSession', () => settings.get('navigationSession'))
-  ipcMain.handle('navigation:saveSession', (_e, session: NavigationSession) => settings.set('navigationSession', session))
+  handle('navigation:getSession', () => settings.get('navigationSession'))
+  handle('navigation:saveSession', (_e, session: NavigationSession) => settings.set('navigationSession', session))
 
   /* ---- Library ---- */
-  ipcMain.handle('library:getRoots', () => ({
+  handle('library:getRoots', () => ({
     musicRoot: paths.musicRoot,
     systemRoot: paths.systemRoot,
     neteaseMusicRoot: settings.get('neteaseMusicRoot')
   }))
-  ipcMain.handle('library:checkMissingAudio', () => findMissingAudioFiles(paths, getDatabase()))
-  ipcMain.handle('library:checkMissingCovers', () => findMissingSongCovers(paths, getDatabase()))
-  ipcMain.handle('library:checkOrphanPictures', () => findOrphanPictureFiles(paths, getDatabase()))
+  handle('library:checkMissingAudio', () => findMissingAudioFiles(paths, getDatabase()))
+  handle('library:checkMissingCovers', () => repairMissingSongCovers(paths, getDatabase()))
+  handle('library:checkOrphanPictures', () => findOrphanPictureFiles(paths, getDatabase()))
+  handle('library:checkAlbumsWithoutSongs', () => findAlbumsWithoutSongs(getDatabase()))
+  handle('library:checkArtistsWithoutSongs', () => findArtistsWithoutSongs(getDatabase()))
+  handle('library:checkDuplicateArtistNames', () => findDuplicateArtistNames(getDatabase()))
+  handle('library:cleanAlbumsWithoutSongs', (_e, ids: number[]) => cleanEmptyLibraryRecords(paths, getDatabase(), 'album', ids))
+  handle('library:cleanArtistsWithoutSongs', (_e, ids: number[]) => cleanEmptyLibraryRecords(paths, getDatabase(), 'artist', ids))
 
-  ipcMain.handle('library:openDatabaseTerminal', () => {
+  handle('library:openDatabaseTerminal', () => {
     if (process.platform !== 'darwin') throw new Error('数据库终端入口目前仅支持 macOS')
     const shellQuotedPath = `'${paths.dbFile.replace(/'/g, "'\\''")}'`
     const command = `sqlite3 ${shellQuotedPath}`
@@ -385,7 +443,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     })
   })
 
-  ipcMain.handle('library:pickMusicRoot', async (): Promise<MusicRootInspection | null> => {
+  handle('library:pickMusicRoot', async (): Promise<MusicRootInspection | null> => {
     const result = await dialog.showOpenDialog({
       title: '选择新的音乐目录（Append / Music 所在位置）',
       properties: ['openDirectory', 'createDirectory']
@@ -398,7 +456,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     return { musicRoot, totalSongs: fileNames.length, missingFiles }
   })
 
-  ipcMain.handle('library:confirmMusicRootChange', (_e, musicRoot: string) => {
+  handle('library:confirmMusicRootChange', (_e, musicRoot: string) => {
     /* 目录选择后的确认步骤只修改配置并重启，绝不复制、移动或删除任何音频文件。 */
     if (!musicRoot || !existsSync(musicRoot)) throw new Error('目标音乐目录不存在')
     settings.set('musicRoot', musicRoot)
@@ -407,7 +465,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     return true
   })
 
-  ipcMain.handle('library:changeNeteaseMusicRoot', async (): Promise<string | null> => {
+  handle('library:changeNeteaseMusicRoot', async (): Promise<string | null> => {
     const result = await dialog.showOpenDialog({
       title: '选择网易云音乐下载目录',
       properties: ['openDirectory']
@@ -418,42 +476,56 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     return directory
   })
 
+  /* 迁移本身不进入普通请求队列，避免等待自身；重复迁移直接拒绝。 */
   ipcMain.handle('library:changeSystemRoot', async () => {
-    /* 系统目录迁移先复制到临时目录并做逐文件 SHA-256 校验；校验成功后才切换设置和删除旧目录。 */
-    const result = await dialog.showOpenDialog({
-      title: '选择新的系统数据目录（.system 所在位置）',
-      properties: ['openDirectory', 'createDirectory']
-    })
-    if (result.canceled || result.filePaths.length === 0) return false
-
-    const newSystemRoot = result.filePaths[0]
-    const currentSystem = resolve(paths.system)
-    const selectedRoot = resolve(newSystemRoot)
-    const relativeToCurrent = relative(currentSystem, selectedRoot)
-    /* 目标若位于当前 .system 内，迁移完成后的清理会把新副本一并删除。 */
-    if (selectedRoot === currentSystem || (!isAbsolute(relativeToCurrent) && !relativeToCurrent.startsWith('..'))) {
-      throw new Error('新的系统目录不能位于当前 .system 文件夹内')
-    }
-    closeDatabase()
+    if (choosingSystemRoot || maintenance.state) throw new Error('系统目录正在迁移，请等待完成')
+    choosingSystemRoot = true
     try {
-      await copyAndVerifySystemDirectory(paths, newSystemRoot)
-      settings.set('systemRoot', newSystemRoot)
-    } catch (error) {
-      /* 配置尚未切换，继续使用旧库，避免一次失败的迁移让当前进程失去数据库连接。 */
-      openDatabase(paths.dbFile)
-      throw error
-    }
+      const result = await dialog.showOpenDialog({
+        title: '选择新的系统数据目录（.system 所在位置）',
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (result.canceled || result.filePaths.length === 0) return false
 
-    /* 新目录已通过完整性校验且设置已成功落盘，此时才移除旧目录。删除失败时保留旧副本并直接重启到已验证的新库。 */
-    try {
-      rmSync(paths.system, { recursive: true, force: false })
-    } catch {
+      const newSystemRoot = await realpath(result.filePaths[0])
+      const currentSystem = await realpath(paths.system)
+      const relativeToCurrent = relative(currentSystem, newSystemRoot)
+      if (newSystemRoot === currentSystem || (!isAbsolute(relativeToCurrent) && !relativeToCurrent.startsWith('..'))) {
+        throw new Error('新的系统目录不能位于当前 .system 文件夹内')
+      }
+      if (existsSync(join(newSystemRoot, '.system'))) throw new Error('目标目录下已存在 .system 文件夹，请另选一个目录')
+
+      await maintenance.begin()
+      let databaseClosed = false
+      try {
+        closeDatabase()
+        databaseClosed = true
+        await copyAndVerifySystemDirectory(paths, newSystemRoot, (state) => maintenance.update(state))
+        settings.set('systemRoot', newSystemRoot)
+      } catch (error) {
+        /* 先恢复连接，再放行等待的库操作。无法恢复连接时重启到仍被配置为当前目录的旧库。 */
+        try {
+          if (databaseClosed) openDatabase(paths.dbFile)
+        } catch {
+          app.relaunch()
+          app.exit(1)
+          return false
+        }
+        maintenance.finish()
+        throw error
+      }
+
+      maintenance.update({ phase: 'finishing', completed: 0, total: 0 })
+      try {
+        await rm(paths.system, { recursive: true, force: false })
+      } catch {
+        /* 新副本已经校验并提交配置；清理失败保留旧目录，仍重启到新库。 */
+      }
       app.relaunch()
       app.exit(0)
       return true
+    } finally {
+      choosingSystemRoot = false
     }
-    app.relaunch()
-    app.exit(0)
-    return true
   })
 }

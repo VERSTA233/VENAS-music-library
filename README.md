@@ -199,6 +199,7 @@ npx electron-builder --win nsis --x64 --publish never
 - **`library/coverCache.ts`**：封面压缩（≤250KB，最长边≤1000px）与写入（歌曲/专辑/艺术家共用同一压缩策略），含专辑封面迁移逻辑。
 - **`library/reload.ts`**：用 `Music/` 内另一文件重载已入库歌曲的物理文件，重新提取时长/封面。
 - **`library/backup.ts`**：数据库自动备份，保留最近 3 份。
+- **`library/healthCleanup.ts`**：设置检查结果的手动清理。只处理已展示的无歌曲专辑或艺术家/厂牌，事务内重新校验，清除对应图片；失败时回滚记录并恢复暂存图片，不删除音频。
 - **`ipc/index.ts`**：全部 `ipcMain.handle` 注册处，是 main 进程功能的总入口（`append:*`、`songs:*`、`artists:*`、`albums:*`、`tags:*`、`playback:*`、`library:*` 等命名空间）。
 
 ### `src/preload/` — 预加载脚本
@@ -209,6 +210,7 @@ npx electron-builder --win nsis --x64 --publish never
 ### `src/renderer/src/` — 渲染进程 UI
 
 - **`main.tsx`**：React 应用挂载入口。
+- **`../../shared/colors.ts`**：全应用颜色库，统一管理暗色背景、文字、状态色、滚动条和播放条颜色，Electron 窗口也共用。所有输入框占位引导文字共用 `placeholder` 色值；`assets/colors.css` 将色值映射为 Tailwind 工具类，组件内避免硬编码颜色或单独覆盖占位文字颜色。
 - **`App.tsx`**：应用外壳。左侧导航（"文件空间"=Append/Music，"基础分类"=Artist/Album），根目录展示与切换，全局空格键播放/暂停快捷键。
 - **`stores/navStore.ts`**：详情页跳转状态（`NavTarget`：跳到某艺术家/厂牌/专辑），以及"从 Music 列表跳转过去、返回时恢复滚动位置"的 `ReturnContext`。
 - **`stores/playerStore.ts`**：播放队列状态（当前队列、当前下标、播放/暂停），`playQueue`/`togglePlay`/`playNext`/`playPrev`。

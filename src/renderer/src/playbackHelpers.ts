@@ -9,7 +9,8 @@ export function formatTime(seconds: number): string {
 }
 
 /*
- * audio 的 timeupdate 事件通常每秒只触发数次。进度条使用这个显示层做帧间插值，
+ * 音频时间更新之间，进度条使用这个显示层做帧间插值；isPlaying 必须代表时钟实际推进，
+ * 不能仅使用播放意图，否则文件尚在解码时就会提前计时。
  * 但不改写 store 中的真实时间，避免影响歌词高亮、会话保存和精确 seek。
  */
 export function useSmoothPlaybackTime(currentTime: number, isPlaying: boolean, duration: number): number {

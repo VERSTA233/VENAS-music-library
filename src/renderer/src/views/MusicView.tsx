@@ -11,7 +11,7 @@ import { useNavStore } from '../stores/navStore'
 
 /* Music 库列表视图：完整展示 songs 表，双击播放，"..." 进入编辑弹窗。 */
 export default function MusicView(): React.JSX.Element {
-  const { songs, total, sort, query, loading, fetchSongs, setSort, setQuery } = useLibraryStore()
+  const { songs, total, sort, sortDirection, query, loading, ensureSongs, fetchSongs, setSort, setSortDirection, setQuery } = useLibraryStore()
   const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
   const [editingSong, setEditingSong] = useState<SongListItem | null>(null)
   const [searchInput, setSearchInput] = useState(query)
@@ -19,8 +19,8 @@ export default function MusicView(): React.JSX.Element {
   const { restoreSignal, clearRestoreSignal } = useNavStore()
 
   useEffect(() => {
-    fetchSongs()
-  }, [fetchSongs])
+    void ensureSongs().catch(() => undefined)
+  }, [ensureSongs])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -51,6 +51,8 @@ export default function MusicView(): React.JSX.Element {
           onQueryChange={setSearchInput}
           sort={sort}
           onSortChange={setSort}
+          direction={sortDirection}
+          onDirectionChange={setSortDirection}
           count={total}
           searchLabel="搜索音乐库"
           children={<RandomPlayButton onClick={() => playRandomQueue(songs.map(toMusicPlayerTrack))} disabled={songs.length === 0} />}
@@ -61,7 +63,14 @@ export default function MusicView(): React.JSX.Element {
         {loading ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
         ) : songs.length === 0 ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">音乐库为空，请先在 Append 中入库歌曲</div>
+          <div className="px-4 py-8 text-center text-neutral-500 text-sm">
+            {query ? (
+              <>
+                <p>无匹配的歌曲</p>
+                <button type="button" onClick={() => { setSearchInput(''); void setQuery('') }} className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-neutral-200 hover:bg-white/15">清空搜索</button>
+              </>
+            ) : '音乐库为空，请先在 Append 中入库歌曲'}
+          </div>
         ) : (
           <SongList
             songs={songs}

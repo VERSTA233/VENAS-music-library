@@ -122,7 +122,7 @@ export async function reloadAudioFile(
   let cover: Buffer | null = null
   if (replacing) {
     const { parseFile } = await import('music-metadata')
-    const metadata = await parseFile(sourcePath)
+    const metadata = await parseFile(sourcePath, { duration: true })
     length = metadata.format.duration ? Math.round(metadata.format.duration) : null
     cover = metadata.common.picture?.[0] ? Buffer.from(metadata.common.picture[0].data) : null
   }
@@ -181,5 +181,20 @@ export async function reloadAudioFile(
 /* 用户手动上传一张图片作为指定歌曲的封面（manual=true：属于专辑时总是覆盖专辑封面） */
 export async function setManualCover(paths: LibraryPaths, songId: number, imageData: Buffer): Promise<void> {
   const db = getDatabase()
+  if (!getSongDetail(db, songId)) throw new ReloadError('歌曲不存在')
   await updateSongCover(paths, db, songId, imageData, { manual: true })
+}
+
+/* 用户主动恢复内嵌封面时覆盖已有缓存，复用入库时的压缩及歌曲/专辑归属规则。 */
+export async function reloadEmbeddedCover(paths: LibraryPaths, songId: number): Promise<void> {
+  const db = getDatabase()
+  const song = getSongDetail(db, songId)
+  if (!song) throw new ReloadError('歌曲不存在')
+  const audioPath = join(paths.music, song.file_name)
+  if (!existsSync(audioPath)) throw new ReloadError('当前音频文件不存在')
+  const { parseFile } = await import('music-metadata')
+  const metadata = await parseFile(audioPath)
+  const picture = metadata.common.picture?.[0]
+  if (!picture) throw new ReloadError('当前音频没有内嵌封面，原封面未更改')
+  await updateSongCover(paths, db, songId, Buffer.from(picture.data), { manual: true })
 }

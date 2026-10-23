@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Pencil } from 'lucide-react'
-import type { AlbumListItem, AlbumListSort, AlbumRow, AlbumSongItem } from '../../../shared/types'
+import type { AlbumListItem, AlbumListSort, AlbumRow, AlbumSongItem, SortDirection } from '../../../shared/types'
 import { usePlayerStore } from '../stores/playerStore'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
@@ -23,6 +23,7 @@ export default function AlbumView(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [sort, setSort] = useState<AlbumListSort>('title')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [query, setQuery] = useState('')
   const { target, clearTarget, navigate, openRoot, requestReturn } = useNavStore()
 
@@ -46,17 +47,30 @@ export default function AlbumView(): React.JSX.Element {
     openRoot('album')
   }
 
+  function handleDetailDeleted(albumId: number): void {
+    setAlbums((current) => current.filter((album) => album.id !== albumId))
+    setSelectedId(null)
+    if (requestReturn()) return
+    openRoot('album')
+  }
+
   const filteredAlbums = useMemo(() => filterAlbums(albums, query), [albums, query])
   const visibleAlbums = useMemo(() => {
-    if (sort === 'library') return [...filteredAlbums].sort((a, b) => b.id - a.id)
+    const multiplier = sortDirection === 'asc' ? 1 : -1
+    if (sort === 'library') return [...filteredAlbums].sort((a, b) => multiplier * (a.id - b.id))
     if (sort === 'count') {
-      return [...filteredAlbums].sort((a, b) => b.songCount - a.songCount || a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }))
+      return [...filteredAlbums].sort((a, b) => multiplier * (a.songCount - b.songCount || a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })))
     }
-    return [...filteredAlbums].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) || a.id - b.id)
-  }, [filteredAlbums, sort])
+    return [...filteredAlbums].sort((a, b) => multiplier * (a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) || a.id - b.id))
+  }, [filteredAlbums, sort, sortDirection])
+
+  function handleSortChange(nextSort: AlbumListSort): void {
+    setSort(nextSort)
+    setSortDirection(nextSort === 'title' ? 'asc' : 'desc')
+  }
 
   if (selectedId !== null) {
-    return <AlbumDetail albumId={selectedId} onBack={handleDetailBack} />
+    return <AlbumDetail albumId={selectedId} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selectedId)} />
   }
 
   return (
@@ -68,7 +82,7 @@ export default function AlbumView(): React.JSX.Element {
           onQueryChange={setQuery}
           placeholder="搜索专辑、艺术家或厂牌"
           searchLabel="搜索专辑、艺术家或厂牌"
-          sortControl={<AlbumSortControl value={sort} onChange={setSort} />}
+          sortControl={<AlbumSortControl value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
           count={filteredAlbums.length}
           countUnit="张"
         />
@@ -113,10 +127,11 @@ export default function AlbumView(): React.JSX.Element {
 interface AlbumDetailProps {
   albumId: number
   onBack: () => void
+  onDeleted: () => void
 }
 
 /* 专辑二级详情页：顶栏集中展示专辑封面与身份信息，曲目按数据库的碟号/曲目号顺序排列。 */
-function AlbumDetail({ albumId, onBack }: AlbumDetailProps): React.JSX.Element {
+function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JSX.Element {
   const [album, setAlbum] = useState<AlbumRow | null>(null)
   const [artists, setArtists] = useState<{ id: number; name: string; order: number }[]>([])
   const [songs, setSongs] = useState<AlbumSongItem[]>([])
@@ -129,7 +144,10 @@ function AlbumDetail({ albumId, onBack }: AlbumDetailProps): React.JSX.Element {
 
   function load(): void {
     window.api.albums.detail(albumId).then((detail) => {
-      if (!detail) return
+      if (!detail) {
+        onDeleted()
+        return
+      }
       setAlbum(detail.album)
       setArtists(detail.artists)
       setSongs(detail.songs)

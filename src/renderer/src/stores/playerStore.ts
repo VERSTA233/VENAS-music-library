@@ -12,14 +12,27 @@ export interface PlayerTrack {
   mediaUrl: string
   songId: number | null
   appendEntry: AppendEntry | null
+  /* 文件内容变化时更新；纯改名、Append 入库不作废已解码的声音。 */
+  contentVersion?: string
 }
 
 export type PlaybackMode = 'sequential' | 'shuffle'
 
-interface PlayerState {
+export interface PlayerState {
+  volume: number
+  muted: boolean
+  setVolume: (volume: number) => void
+  toggleMute: () => void
+  gaplessEnabled: boolean
+  gaplessReady: boolean
+  setGaplessEnabled: (enabled: boolean) => void
+  playbackError: string | null
+  backend: 'web-audio' | 'stream' | null
   queue: PlayerTrack[]
   currentIndex: number | null
   isPlaying: boolean
+  /* 播放意图与实际时钟分开：读取、解码、缓冲期间不推进显示时间。 */
+  isAdvancing: boolean
   playbackMode: PlaybackMode
   shuffleOrder: number[]
   currentTime: number
@@ -57,10 +70,35 @@ function shuffledIndexes(length: number, currentIndex: number): number[] {
   return [currentIndex, ...remaining]
 }
 
+/* 预加载和手动切歌共用同一顺序，查询下一首不改变随机队列。 */
+export function adjacentTrackIndex(state: Pick<PlayerState, 'queue' | 'currentIndex' | 'playbackMode' | 'shuffleOrder'>, step = 1): number | null {
+  const { queue, currentIndex, playbackMode, shuffleOrder } = state
+  if (currentIndex == null || queue.length === 0) return null
+  if (playbackMode === 'shuffle' && shuffleOrder.length === queue.length && new Set(shuffleOrder).size === queue.length && shuffleOrder.every((index) => Number.isInteger(index) && index >= 0 && index < queue.length)) {
+    const position = shuffleOrder.indexOf(currentIndex)
+    return shuffleOrder[(position + step + queue.length) % queue.length]
+  }
+  return (currentIndex + step + queue.length) % queue.length
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
+  volume: 1,
+  muted: false,
+  setVolume: (volume) => {
+    if (Number.isFinite(volume)) set({ volume: Math.max(0, Math.min(1, volume)), muted: false })
+  },
+  toggleMute: () => set((state) => state.volume === 0
+    ? { volume: 1, muted: false }
+    : { muted: !state.muted }),
+  gaplessEnabled: true,
+  gaplessReady: false,
+  setGaplessEnabled: (enabled) => set({ gaplessEnabled: enabled }),
+  playbackError: null,
+  backend: null,
   queue: [],
   currentIndex: null,
   isPlaying: false,
+  isAdvancing: false,
   playbackMode: 'sequential',
   shuffleOrder: [],
   currentTime: 0,
@@ -102,27 +140,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     set((s) => ({ isPlaying: !s.isPlaying }))
   },
   playNext: () => {
-    const { queue, currentIndex, playbackMode, shuffleOrder } = get()
-    if (currentIndex === null || queue.length === 0) return
-    if (playbackMode === 'shuffle') {
-      const order = shuffleOrder.length ? shuffleOrder : shuffledIndexes(queue.length, currentIndex)
-      const position = order.indexOf(currentIndex)
-      const nextPosition = (position + 1) % order.length
-      set({ currentIndex: order[nextPosition], isPlaying: true, shuffleOrder: order, currentTime: 0, duration: 0, seekRequest: null, transientPlaybackSource: null })
-      return
-    }
-    set({ currentIndex: (currentIndex + 1) % queue.length, isPlaying: true, currentTime: 0, duration: 0, seekRequest: null, transientPlaybackSource: null })
+    const state = get()
+    const index = adjacentTrackIndex(state)
+    if (index == null) return
+    set({ currentIndex: index, isPlaying: true, currentTime: 0, duration: 0,
+      seekRequest: { time: 0, nonce: (state.seekRequest?.nonce ?? 0) + 1, trackKey: state.queue[index].key }, transientPlaybackSource: null })
   },
   playPrev: () => {
-    const { queue, currentIndex, playbackMode, shuffleOrder } = get()
-    if (currentIndex === null || queue.length === 0) return
-    if (playbackMode === 'shuffle') {
-      const order = shuffleOrder.length ? shuffleOrder : shuffledIndexes(queue.length, currentIndex)
-      const position = order.indexOf(currentIndex)
-      set({ currentIndex: order[(position - 1 + order.length) % order.length], isPlaying: true, shuffleOrder: order, currentTime: 0, duration: 0, seekRequest: null, transientPlaybackSource: null })
-      return
-    }
-    set({ currentIndex: (currentIndex - 1 + queue.length) % queue.length, isPlaying: true, currentTime: 0, duration: 0, seekRequest: null, transientPlaybackSource: null })
+    const state = get()
+    const index = adjacentTrackIndex(state, -1)
+    if (index == null) return
+    set({ currentIndex: index, isPlaying: true, currentTime: 0, duration: 0,
+      seekRequest: { time: 0, nonce: (state.seekRequest?.nonce ?? 0) + 1, trackKey: state.queue[index].key }, transientPlaybackSource: null })
   },
   playAt: (index) => {
     const { queue, playbackMode } = get()
@@ -132,7 +161,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isPlaying: true,
       currentTime: 0,
       duration: 0,
-      seekRequest: null,
+      seekRequest: { time: 0, nonce: (get().seekRequest?.nonce ?? 0) + 1, trackKey: queue[index].key },
       transientPlaybackSource: null,
       shuffleOrder: playbackMode === 'shuffle' ? shuffledIndexes(queue.length, index) : []
     })
@@ -147,7 +176,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const { currentIndex, queue } = get()
     const trackKey = currentIndex == null ? null : queue[currentIndex]?.key
     if (!trackKey) return
-    /* currentTime 只由 audio 的 timeupdate/seeked 确认，避免旧播放位置在 seek 生效前短暂回写。 */
+    /* currentTime 由音频引擎确认，避免旧播放位置在 seek 生效前短暂回写。 */
     set((state) => ({ seekRequest: { time, nonce: (state.seekRequest?.nonce ?? 0) + 1, trackKey } }))
   },
   promoteAppendTrack: (appendFileName, musicTrack) => {
@@ -168,7 +197,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     })
   },
   removeAppendTrack: (appendFileName) => {
-    const { queue, currentIndex } = get()
+    const { queue, currentIndex, playbackMode } = get()
     if (currentIndex == null) return
     const currentTrackRemoved = queue[currentIndex]?.appendEntry?.fileName === appendFileName
     const removedBeforeCurrent = queue.slice(0, currentIndex).filter((track) => track.appendEntry?.fileName === appendFileName).length
@@ -179,13 +208,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
     if (currentTrackRemoved) {
       const nextIndex = Math.min(currentIndex - removedBeforeCurrent, nextQueue.length - 1)
-      set({ queue: nextQueue, currentIndex: nextIndex, isPlaying: true, currentTime: 0, duration: 0, seekRequest: null, shuffleOrder: [], transientPlaybackSource: null })
+      set({ queue: nextQueue, currentIndex: nextIndex, isPlaying: true, currentTime: 0, duration: 0, seekRequest: null, shuffleOrder: playbackMode === 'shuffle' ? shuffledIndexes(nextQueue.length, nextIndex) : [], transientPlaybackSource: null })
       return
     }
-    set({ queue: nextQueue, currentIndex: currentIndex - removedBeforeCurrent, shuffleOrder: [] })
+    const nextIndex = currentIndex - removedBeforeCurrent
+    set({ queue: nextQueue, currentIndex: nextIndex, shuffleOrder: playbackMode === 'shuffle' ? shuffledIndexes(nextQueue.length, nextIndex) : [] })
   },
   removeSong: (songId) => {
-    const { queue, currentIndex } = get()
+    const { queue, currentIndex, playbackMode } = get()
     if (currentIndex == null) return
     const currentTrackRemoved = queue[currentIndex]?.songId === songId
     const removedBeforeCurrent = queue.slice(0, currentIndex).filter((track) => track.songId === songId).length
@@ -196,15 +226,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
     if (currentTrackRemoved) {
       const nextIndex = Math.min(currentIndex - removedBeforeCurrent, nextQueue.length - 1)
-      set({ queue: nextQueue, currentIndex: nextIndex, isPlaying: true, currentTime: 0, duration: 0, seekRequest: null, shuffleOrder: [], transientPlaybackSource: null })
+      set({ queue: nextQueue, currentIndex: nextIndex, isPlaying: true, currentTime: 0, duration: 0, seekRequest: null, shuffleOrder: playbackMode === 'shuffle' ? shuffledIndexes(nextQueue.length, nextIndex) : [], transientPlaybackSource: null })
       return
     }
-    set({ queue: nextQueue, currentIndex: currentIndex - removedBeforeCurrent, shuffleOrder: [] })
+    const nextIndex = currentIndex - removedBeforeCurrent
+    set({ queue: nextQueue, currentIndex: nextIndex, shuffleOrder: playbackMode === 'shuffle' ? shuffledIndexes(nextQueue.length, nextIndex) : [] })
   },
   updateSongFile: (songId, fileName, audioReplaced) => {
     const state = get()
-    const mediaUrl = window.api.songs.mediaUrl(fileName)
-    const nextQueue = state.queue.map((track) => track.songId === songId ? { ...track, mediaUrl } : track)
+    const contentVersion = audioReplaced ? crypto.randomUUID() : undefined
+    const mediaUrl = window.api.songs.mediaUrl(fileName) + (contentVersion ? `?v=${contentVersion}` : '')
+    const nextQueue = state.queue.map((track) => track.songId === songId ? { ...track, mediaUrl, contentVersion: contentVersion ?? track.contentVersion } : track)
     if (nextQueue.every((track, index) => track === state.queue[index])) return
     const currentTrack = state.currentIndex == null ? null : state.queue[state.currentIndex]
     const currentWasUpdated = currentTrack?.songId === songId

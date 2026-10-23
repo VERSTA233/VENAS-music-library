@@ -4,8 +4,7 @@ import ArtistPicker, { type ArtistFormEntry } from './ArtistPicker'
 import LabelPicker from './LabelPicker'
 import YMDDateInput from './YMDDateInput'
 
-/* album_type 建议值（非数据库约束，仅作为下拉候选，用户可自由输入其他类型） */
-const ALBUM_TYPE_SUGGESTIONS = ['Album', 'EP', 'Single', 'Live', 'Compilation']
+import { ALBUM_TYPE_SUGGESTIONS, albumTypeOptions } from '../constants/albumTypes'
 
 /* 专辑被显式选定时的字段快照（不含曲目号/碟号，这两项恒为单曲自身属性），用于判断选定后是否发生了"脏改动" */
 export interface AlbumSnapshot {
@@ -239,7 +238,7 @@ export default function AlbumPicker({ value, onChange, onArtistTypeChange }: Alb
               onTypeChange={onArtistTypeChange}
             />
           </div>
-          <div className="flex items-center gap-2 bg-white/5 rounded px-2 py-1">
+          <div className="flex items-center gap-2 rounded border border-white/10 bg-white/5 px-2 py-1 transition focus-within:border-white/30">
             <LabelPicker values={value.labels} onChange={(labels) => onChange({ ...value, labels })} />
           </div>
           <div className="flex gap-2">
@@ -262,7 +261,7 @@ export default function AlbumPicker({ value, onChange, onArtistTypeChange }: Alb
               }}
               className="bg-white/5 border border-white/10 rounded text-sm px-1 outline-none"
             >
-              {ALBUM_TYPE_SUGGESTIONS.map((t) => (
+              {albumTypeOptions(value.albumType).map((t) => (
                 <option key={t} value={t} className="bg-neutral-900">
                   {t}
                 </option>

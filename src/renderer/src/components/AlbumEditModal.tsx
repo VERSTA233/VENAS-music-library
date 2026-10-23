@@ -6,8 +6,9 @@ import LabelPicker from './LabelPicker'
 import Cover from './Cover'
 import YMDDateInput from './YMDDateInput'
 import { usePlayerStore } from '../stores/playerStore'
+import { useLibraryStore } from '../stores/libraryStore'
 
-const ALBUM_TYPE_SUGGESTIONS = ['Album', 'EP', 'Single', 'Live', 'Compilation']
+import { albumTypeOptions } from '../constants/albumTypes'
 
 interface AlbumEditModalProps {
   album: AlbumRow
@@ -33,7 +34,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const hasTrack = usePlayerStore((state) => state.currentIndex !== null)
-  const typeOptions = Array.from(new Set([albumType, ...ALBUM_TYPE_SUGGESTIONS].filter(Boolean)))
+  const typeOptions = albumTypeOptions(albumType)
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0]
@@ -73,6 +74,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
     }
     try {
       await window.api.albums.update(album.id, data)
+      useLibraryStore.getState().invalidateSongs()
       onSaved()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -85,7 +87,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
 
   return (
     <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`} role="dialog" aria-modal="true" aria-labelledby="album-edit-title">
-      <div className={`flex w-[min(620px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
+      <div className={`flex w-[min(620px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
         <div className="window-drag-region flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
           <h2 id="album-edit-title" className="truncate text-base font-semibold text-white">编辑专辑</h2>
           <button type="button" onClick={onClose} disabled={busy} className="library-icon-button disabled:opacity-30" title="关闭" aria-label="关闭"><X size={18} /></button>
@@ -109,29 +111,27 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
               <input value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40" />
             </label>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-[minmax(11rem,1.45fr)_minmax(8rem,1fr)_5.5rem]">
               <label className="flex flex-col gap-1.5 text-xs text-neutral-500">
                 发行日期
                 <YMDDateInput value={releaseDate} onChange={setReleaseDate} className="!justify-start" />
               </label>
               <label className="flex flex-col gap-1.5 text-xs text-neutral-500">
                 专辑类型
-                <select value={albumType} onChange={(event) => setAlbumType(event.target.value)} disabled={busy} className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40">
+                <select value={albumType} onChange={(event) => setAlbumType(event.target.value)} disabled={busy} className="h-8 rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40">
                   {typeOptions.map((option) => <option key={option} value={option} className="bg-neutral-900">{option}</option>)}
                 </select>
               </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5 text-xs text-neutral-500">
                 总碟数
-                <input value={totalDiscs} onChange={(event) => setTotalDiscs(event.target.value.replace(/[^0-9]/g, ''))} disabled={busy} className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40" />
+                <input value={totalDiscs} onChange={(event) => setTotalDiscs(event.target.value.replace(/[^0-9]/g, ''))} disabled={busy} inputMode="numeric" className="h-8 w-full rounded-lg border border-white/[0.1] bg-white/[0.05] px-2 text-center text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40" />
               </label>
-              <div className="flex flex-col gap-1.5 text-xs text-neutral-500">
-                <span>厂牌</span>
-                <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 focus-within:border-white/[0.25] focus-within:bg-white/[0.08]">
-                  <LabelPicker values={labels} onChange={setLabels} disabled={busy} />
-                </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5 text-xs text-neutral-500">
+              <span>厂牌</span>
+              <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 transition focus-within:border-white/[0.25] focus-within:bg-white/[0.08]">
+                <LabelPicker values={labels} onChange={setLabels} disabled={busy} />
               </div>
             </div>
 

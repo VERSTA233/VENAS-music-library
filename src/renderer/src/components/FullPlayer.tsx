@@ -20,7 +20,7 @@ interface FullPlayerProps {
 
 /* 沉浸式播放层从底部进入并沿同一路径收起，避免播放中误触拖拽。 */
 export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProps): React.JSX.Element {
-  const { queue, currentIndex, isPlaying, togglePlay, playNext, playPrev, playAt, playbackMode, setPlaybackMode, currentTime, duration, requestSeek } = usePlayerStore()
+  const { queue, currentIndex, isPlaying, isAdvancing, togglePlay, playNext, playPrev, playAt, playbackMode, setPlaybackMode, currentTime, duration, requestSeek } = usePlayerStore()
   const currentTrack = currentIndex == null ? null : queue[currentIndex] ?? null
   const [detail, setDetail] = useState<SongDetail | null>(null)
   const [playlistOpen, setPlaylistOpen] = useState(false)
@@ -58,7 +58,7 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
     <AnimatePresence>
       {open && currentTrack && (
         <motion.section
-          className="fixed inset-0 z-[100] flex min-h-0 flex-col overflow-hidden bg-[#101114] text-white"
+          className="fixed inset-0 z-[100] flex min-h-0 flex-col overflow-hidden bg-player text-white"
           initial={{ y: '100%', opacity: 0.7 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: '100%', opacity: 0.7 }}
@@ -82,25 +82,32 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
                 <PlaybackCover track={currentTrack} className="aspect-square w-full rounded-xl object-cover shadow-2xl shadow-black/40" />
                 <div className="flex min-w-0 flex-col gap-1 pt-5">
                   <TruncatedText text={currentTrack.title} lines={2} revealDelay={1500} className="text-2xl font-semibold leading-tight" />
-                  {detail ? (
-                    <HoverMarqueeArtistLinks artists={detail.artists} fullText={artistText} onNavigate={closeAndNavigate} />
-                  ) : (
-                    <HoverMarqueeText text={artistText} className="text-base leading-6 text-neutral-400" />
-                  )}
+                  <div className="relative top-[2px]">
+                    {detail ? (
+                      <HoverMarqueeArtistLinks artists={detail.artists} fullText={artistText} onNavigate={closeAndNavigate} />
+                    ) : (
+                      <HoverMarqueeText text={artistText} className="text-base leading-6 text-neutral-400" />
+                    )}
+                  </div>
                   {detail?.album ? (
                     <button
-                      className="w-full min-w-0 cursor-pointer text-left transition hover:text-neutral-200 focus-visible:text-white"
+                      className="w-full min-w-0 cursor-pointer text-left text-neutral-500 outline-none transition-colors duration-200 ease-out hover:text-neutral-200 focus-visible:text-white active:text-white"
                       onClick={() => closeAndNavigate({ view: 'album', id: detail.album!.id })}
                     >
-                      <HoverMarqueeText text={detail.album.title} className="text-sm leading-6 text-neutral-500" />
+                      <HoverMarqueeText
+                        text={detail.album.title}
+                        className="text-sm leading-6"
+                      />
                     </button>
                   ) : appendAlbum ? (
                     <HoverMarqueeText text={appendAlbum} className="text-sm leading-6 text-neutral-500" />
                   ) : null}
                 </div>
               </div>
-              <aside className="order-2 min-h-[280px] overflow-hidden md:aspect-[4/5] md:min-h-0 md:translate-x-5">
-                <SyncedLyrics lyric={lyric} currentTime={currentTime} isPlaying={isPlaying} onSeek={requestSeek} />
+              <aside className="relative order-2 min-h-[280px] overflow-hidden md:min-h-0 md:translate-x-5">
+                <div className="absolute inset-0">
+                  <SyncedLyrics lyric={lyric} currentTime={currentTime} isPlaying={isPlaying} onSeek={requestSeek} />
+                </div>
               </aside>
             </div>
           </div>
@@ -114,7 +121,7 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
               <PlaybackProgress
                 currentTime={currentTime}
                 duration={duration}
-                isPlaying={isPlaying}
+                isPlaying={isPlaying && isAdvancing}
                 onSeek={requestSeek}
                 trailing={<button type="button" onClick={openTrackDetail} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition active:scale-95 hover:bg-white/10 hover:text-white" title="歌曲信息 / 添加到音乐库" aria-label="歌曲信息 / 添加到音乐库"><MoreHorizontal size={20} /></button>}
               />
@@ -161,7 +168,7 @@ function HoverMarqueeArtistLinks({
             {index > 0 && <span className="mx-2 text-neutral-600">/</span>}
             <button
               type="button"
-              className="cursor-pointer transition hover:text-white focus-visible:text-white"
+              className="cursor-pointer transition-colors duration-200 ease-out hover:text-white focus-visible:text-white"
               onClick={() => onNavigate({ view: 'artist', id: artist.id, isLabel: false })}
             >
               {artist.name}
@@ -170,7 +177,7 @@ function HoverMarqueeArtistLinks({
         ))}
         </span>
       </span>
-      {showEllipsis && <span className="absolute right-0 top-0 bg-[#101114] pl-0.5 text-neutral-400"> ...</span>}
+      {showEllipsis && <span className="absolute right-0 top-0 bg-player pl-0.5 text-neutral-400"> ...</span>}
     </div>
   )
 }
@@ -193,7 +200,7 @@ function HoverMarqueeText({ text, className }: { text: string; className: string
           {text}
         </span>
       </span>
-      {showEllipsis && <span className={`absolute right-0 top-0 bg-[#101114] pl-0.5 ${className}`}> ...</span>}
+      {showEllipsis && <span className={`absolute right-0 top-0 bg-player pl-0.5 ${className}`}> ...</span>}
     </span>
   )
 }
@@ -270,7 +277,7 @@ function TruncatedText({
       </span>
       <span ref={measureRef} aria-hidden="true" className={`pointer-events-none absolute left-0 top-0 -z-10 block invisible ${className}`} />
       {revealed && (
-        <span role="tooltip" className="pointer-events-none absolute left-0 top-full z-30 mt-2 w-max max-w-[min(32rem,calc(100vw-3rem))] rounded-lg bg-[#25262b]/95 px-3 py-2 text-sm font-medium leading-5 text-white shadow-xl shadow-black/40 backdrop-blur-xl">
+        <span role="tooltip" className="pointer-events-none absolute left-0 top-full z-30 mt-2 w-max max-w-[min(32rem,calc(100vw-3rem))] rounded-lg bg-tooltip/95 px-3 py-2 text-sm font-medium leading-5 text-white shadow-xl shadow-black/40 backdrop-blur-xl">
           {text}
         </span>
       )}

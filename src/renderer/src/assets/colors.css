@@ -1,0 +1,45 @@
+/* 将共享颜色库映射为 Tailwind 颜色工具；实际色值统一位于 src/shared/colors.ts。 */
+@theme inline {
+  --color-white: var(--palette-white);
+  --color-black: var(--palette-black);
+  --color-neutral-100: var(--palette-neutral-100);
+  --color-neutral-200: var(--palette-neutral-200);
+  --color-neutral-300: var(--palette-neutral-300);
+  --color-neutral-400: var(--palette-neutral-400);
+  --color-neutral-500: var(--palette-neutral-500);
+  --color-neutral-600: var(--palette-neutral-600);
+  --color-neutral-700: var(--palette-neutral-700);
+  --color-neutral-800: var(--palette-neutral-800);
+  --color-neutral-900: var(--palette-neutral-900);
+  --color-neutral-950: var(--palette-neutral-950);
+  --color-red-100: var(--palette-red-100);
+  --color-red-200: var(--palette-red-200);
+  --color-red-300: var(--palette-red-300);
+  --color-red-400: var(--palette-red-400);
+  --color-red-500: var(--palette-red-500);
+  --color-amber-200: var(--palette-amber-200);
+  --color-amber-300: var(--palette-amber-300);
+  --color-amber-400: var(--palette-amber-400);
+  --color-amber-500: var(--palette-amber-500);
+  --color-green-500: var(--palette-green-500);
+  --color-yellow-500: var(--palette-yellow-500);
+  --color-emerald-500: var(--palette-emerald-500);
+  --color-app: var(--palette-app);
+  --color-sidebar: var(--palette-sidebar);
+  --color-content: var(--palette-content);
+  --color-panel: var(--palette-panel);
+  --color-menu: var(--palette-menu);
+  --color-player: var(--palette-player);
+  --color-tooltip: var(--palette-tooltip);
+  --color-dialog: var(--palette-dialog);
+  --color-queue: var(--palette-queue);
+  --color-placeholder: var(--palette-placeholder);
+}
+
+@layer base {
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--palette-placeholder);
+    opacity: 1;
+  }
+}

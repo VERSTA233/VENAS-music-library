@@ -1,10 +1,11 @@
 @import 'tailwindcss';
+@import './colors.css';
 
-/* 全局暗色基调，跟主进程窗口背景色 #0b0b0f 保持一致 */
+/* 全局暗色基调，与主进程窗口共用颜色库。 */
 body {
   margin: 0;
-  background-color: #0e0e10;
-  color: #f4f4f5;
+  background-color: var(--palette-app);
+  color: var(--palette-foreground);
   font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   font-optical-sizing: auto;
 }
@@ -16,7 +17,7 @@ button {
 /* 所有可滚动区域采用同一套深色、低干扰的滚动条。 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scrollbar-color: var(--palette-scrollbar) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -31,19 +32,19 @@ button {
 *::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--palette-scrollbar);
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.36);
+  background: var(--palette-scrollbar-hover);
   background-clip: padding-box;
 }
 
 .library-toolbar,
 .library-subtoolbar,
 .library-footer {
-  background: rgba(20, 20, 23, 0.76);
+  background: var(--palette-toolbar);
   backdrop-filter: blur(22px) saturate(145%);
 }
 
@@ -95,13 +96,13 @@ button {
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  color: #a1a1aa;
+  color: var(--palette-icon);
   transition: background-color 160ms ease-out, color 160ms ease-out, transform 100ms ease-out;
 }
 
 .library-icon-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--palette-icon-hover);
+  color: var(--palette-white);
 }
 
 .library-icon-button:active {
@@ -119,7 +120,7 @@ button {
 .player-progress::-webkit-slider-runnable-track {
   height: 0.25rem;
   border-radius: 9999px;
-  background: linear-gradient(to right, rgba(255, 255, 255, 0.92) 0 var(--progress), rgba(255, 255, 255, 0.22) var(--progress) 100%);
+  background: linear-gradient(to right, var(--palette-progress-fill) 0 var(--progress), var(--palette-progress-track) var(--progress) 100%);
 }
 
 .player-progress::-webkit-slider-thumb {
@@ -129,21 +130,21 @@ button {
   margin-top: -0.1875rem;
   border: 0;
   border-radius: 0.25rem;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  background: var(--palette-white);
+  box-shadow: 0 1px 4px var(--palette-progress-shadow);
 }
 
 .player-progress::-moz-range-track {
   height: 0.25rem;
   border: 0;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--palette-progress-track);
 }
 
 .player-progress::-moz-range-progress {
   height: 0.25rem;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--palette-progress-fill);
 }
 
 .player-progress::-moz-range-thumb {
@@ -151,13 +152,13 @@ button {
   height: 0.625rem;
   border: 0;
   border-radius: 0.25rem;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  background: var(--palette-white);
+  box-shadow: 0 1px 4px var(--palette-progress-shadow);
 }
 
 .modal-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scrollbar-color: var(--palette-scrollbar) transparent;
   scrollbar-gutter: stable;
 }
 
@@ -172,19 +173,19 @@ button {
 .modal-scroll::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--palette-scrollbar);
   background-clip: padding-box;
 }
 
 .modal-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.36);
+  background: var(--palette-scrollbar-hover);
   background-clip: padding-box;
 }
 
 main,
 main * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  scrollbar-color: var(--palette-scrollbar) transparent;
 }
 
 main ::-webkit-scrollbar {
@@ -199,12 +200,12 @@ main ::-webkit-scrollbar-track {
 main ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--palette-scrollbar);
   background-clip: padding-box;
 }
 
 main ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.36);
+  background: var(--palette-scrollbar-hover);
   background-clip: padding-box;
 }
 
@@ -232,6 +233,6 @@ input:focus-visible {
   .library-subtoolbar,
   .library-footer {
     backdrop-filter: none;
-    background: #171719;
+    background: var(--palette-solid-surface);
   }
 }

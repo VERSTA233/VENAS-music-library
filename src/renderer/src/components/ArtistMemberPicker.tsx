@@ -81,7 +81,7 @@ export default function ArtistMemberPicker({
             }
           }}
           placeholder="搜索已有艺术家"
-          className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-600 disabled:opacity-40"
+          className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none disabled:opacity-40"
         />
       </div>
 

@@ -62,7 +62,7 @@ export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX
               addExisting(suggestions[0])
             }
           }}
-          placeholder="搜索或新建 Tag"
+          placeholder="搜索或输入 Tag"
           className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
         />
         {query.trim() && !exactMatch && (

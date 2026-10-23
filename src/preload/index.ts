@@ -8,6 +8,7 @@ import type {
   ReloadFileSelection,
   SongListItem,
   SongListSort,
+  SortDirection,
   SongDetail,
   SongUpdateData,
   ArtistRow,
@@ -28,12 +29,19 @@ import type {
   LabelListItem,
   LabelAlbumGroup,
   PlaybackSession,
+  PlaybackVolume,
   NavigationSession,
   MusicRootInspection,
   MissingAudioFile,
   MissingSongCover,
   OrphanPictureFiles,
-  NeteaseImportResult
+  AlbumWithoutSongs,
+  ArtistWithoutSongs,
+  EmptyRecordCleanupResult,
+  DuplicateArtistNameGroup,
+  NeteaseImportResult,
+  LibraryMaintenanceState,
+  PlaybackFileInfo
 } from '../shared/types'
 
 /*
@@ -59,14 +67,15 @@ const api = {
       ipcRenderer.invoke('append:pickLyricFile')
   },
   songs: {
-    list: (sort: SongListSort = 'library', query = ''): Promise<{ items: SongListItem[]; total: number }> =>
-      ipcRenderer.invoke('songs:list', sort, query),
+    list: (sort: SongListSort = 'library', query = '', direction: SortDirection = 'desc'): Promise<{ items: SongListItem[]; total: number }> =>
+      ipcRenderer.invoke('songs:list', sort, query, direction),
     detail: (songId: number): Promise<SongDetail | null> => ipcRenderer.invoke('songs:detail', songId),
     delete: (songId: number): Promise<void> => ipcRenderer.invoke('songs:delete', songId),
     update: (songId: number, data: SongUpdateData): Promise<ReloadResult> =>
       ipcRenderer.invoke('songs:update', songId, data),
     setManualCover: (songId: number, imageData: Uint8Array): Promise<void> =>
       ipcRenderer.invoke('songs:setManualCover', songId, imageData),
+    reloadEmbeddedCover: (songId: number): Promise<void> => ipcRenderer.invoke('songs:reloadEmbeddedCover', songId),
     cover: (songId: number): Promise<Uint8Array | null> => ipcRenderer.invoke('songs:cover', songId),
     embeddedCover: (songId: number): Promise<Uint8Array | null> => ipcRenderer.invoke('songs:embeddedCover', songId),
     /* 拼 venas-media:// URL 给 <audio> 直接播放，纯字符串操作不需要走 IPC */
@@ -140,6 +149,11 @@ const api = {
     delete: (tagId: number): Promise<void> => ipcRenderer.invoke('tags:delete', tagId)
   },
   playback: {
+    getVolume: (): Promise<PlaybackVolume> => ipcRenderer.invoke('playback:getVolume'),
+    setVolume: (value: PlaybackVolume): Promise<void> => ipcRenderer.invoke('playback:setVolume', value),
+    inspectFile: (mediaUrl: string): Promise<PlaybackFileInfo> => ipcRenderer.invoke('playback:inspectFile', mediaUrl),
+    getGapless: (): Promise<boolean> => ipcRenderer.invoke('playback:getGapless'),
+    setGapless: (enabled: boolean): Promise<void> => ipcRenderer.invoke('playback:setGapless', enabled),
     touchLastHeard: (songId: number): Promise<void> => ipcRenderer.invoke('playback:touchLastHeard', songId),
     getSession: (): Promise<PlaybackSession | null> => ipcRenderer.invoke('playback:getSession'),
     saveSession: (session: PlaybackSession | null): Promise<void> => ipcRenderer.invoke('playback:saveSession', session)
@@ -149,11 +163,22 @@ const api = {
     saveSession: (session: NavigationSession): Promise<void> => ipcRenderer.invoke('navigation:saveSession', session)
   },
   library: {
+    getMaintenanceState: (): Promise<LibraryMaintenanceState | null> => ipcRenderer.invoke('library:getMaintenanceState'),
+    onMaintenanceChange: (callback: (state: LibraryMaintenanceState | null) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: LibraryMaintenanceState | null) => callback(state)
+      ipcRenderer.on('library:maintenance', listener)
+      return () => { ipcRenderer.removeListener('library:maintenance', listener) }
+    },
     getRoots: (): Promise<{ musicRoot: string; systemRoot: string; neteaseMusicRoot: string | null }> =>
       ipcRenderer.invoke('library:getRoots'),
     checkMissingAudio: (): Promise<MissingAudioFile[]> => ipcRenderer.invoke('library:checkMissingAudio'),
     checkMissingCovers: (): Promise<MissingSongCover[]> => ipcRenderer.invoke('library:checkMissingCovers'),
     checkOrphanPictures: (): Promise<OrphanPictureFiles> => ipcRenderer.invoke('library:checkOrphanPictures'),
+    checkAlbumsWithoutSongs: (): Promise<AlbumWithoutSongs[]> => ipcRenderer.invoke('library:checkAlbumsWithoutSongs'),
+    checkArtistsWithoutSongs: (): Promise<ArtistWithoutSongs[]> => ipcRenderer.invoke('library:checkArtistsWithoutSongs'),
+    checkDuplicateArtistNames: (): Promise<DuplicateArtistNameGroup[]> => ipcRenderer.invoke('library:checkDuplicateArtistNames'),
+    cleanAlbumsWithoutSongs: (ids: number[]): Promise<EmptyRecordCleanupResult> => ipcRenderer.invoke('library:cleanAlbumsWithoutSongs', ids),
+    cleanArtistsWithoutSongs: (ids: number[]): Promise<EmptyRecordCleanupResult> => ipcRenderer.invoke('library:cleanArtistsWithoutSongs', ids),
     /* 选择后只扫描目标目录，不修改设置或文件；由确认接口完成切换。 */
     pickMusicRoot: (): Promise<MusicRootInspection | null> => ipcRenderer.invoke('library:pickMusicRoot'),
     /* 不搬运文件，只保存新的音乐根目录并重启应用。 */

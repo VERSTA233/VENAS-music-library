@@ -25,7 +25,7 @@ function combine(y: string, m: string, d: string): string {
 }
 
 const inputClass =
-  'bg-white/5 border border-white/10 rounded px-1.5 py-1 text-sm text-center outline-none focus:border-white/30'
+  'h-8 rounded border border-white/10 bg-white/5 px-1.5 text-center text-sm text-neutral-100 outline-none focus:border-white/30'
 
 /* 年/月/日三个独立输入框，内部按已填写精度拼接，对外仍是单个受控 string。 */
 export default function YMDDateInput({ value, onChange, className }: YMDDateInputProps): React.JSX.Element {

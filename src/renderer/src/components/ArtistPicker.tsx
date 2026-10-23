@@ -126,8 +126,8 @@ export default function ArtistPicker({
               addArtist(suggestions[0].name)
             }
           }}
-          placeholder="搜索或输入新艺术家名"
-          className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
+          placeholder="搜索或输入艺术家"
+          className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-white/30"
         />
         {suggestions.length > 0 && (
           <div className="absolute z-10 mt-1 w-full bg-neutral-900 border border-white/10 rounded shadow-lg max-h-40 overflow-y-auto">

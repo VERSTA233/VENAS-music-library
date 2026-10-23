@@ -9,7 +9,8 @@ import type {
   LabelAlbumGroup,
   AlbumSongItem,
   SongListSort,
-  ArtistListSort
+  ArtistListSort,
+  SortDirection
 } from '../../../shared/types'
 import { usePlayerStore } from '../stores/playerStore'
 import { toMusicPlayerTrack } from '../playerTracks'
@@ -47,6 +48,7 @@ export default function ArtistView(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selected | null>(null)
   const [sort, setSort] = useState<ArtistListSort>('name')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [query, setQuery] = useState('')
   const { target, clearTarget, navigate, openRoot, requestReturn } = useNavStore()
 
@@ -72,21 +74,34 @@ export default function ArtistView(): React.JSX.Element {
     openRoot('artist')
   }
 
+  function handleDetailDeleted(id: number): void {
+    setItems((current) => current.filter((item) => item.id !== id))
+    setSelected(null)
+    if (requestReturn()) return
+    openRoot('artist')
+  }
+
   const filteredItems = useMemo(() => filterArtists(items, query), [items, query])
   const visibleItems = useMemo(() => {
+    const multiplier = sortDirection === 'asc' ? 1 : -1
     /* 与 Music 页的默认库顺序一致：较晚写入数据库的记录优先。 */
-    if (sort === 'library') return [...filteredItems].sort((a, b) => b.id - a.id)
+    if (sort === 'library') return [...filteredItems].sort((a, b) => multiplier * (a.id - b.id))
     if (sort === 'count') {
-      return [...filteredItems].sort((a, b) => b.songCount - a.songCount || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      return [...filteredItems].sort((a, b) => multiplier * (a.songCount - b.songCount || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })))
     }
-    return [...filteredItems].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id)
-  }, [filteredItems, sort])
+    return [...filteredItems].sort((a, b) => multiplier * (a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id))
+  }, [filteredItems, sort, sortDirection])
+
+  function handleSortChange(nextSort: ArtistListSort): void {
+    setSort(nextSort)
+    setSortDirection(nextSort === 'name' ? 'asc' : 'desc')
+  }
 
   if (selected !== null) {
     return selected.isLabel ? (
-      <LabelDetail labelId={selected.id} onBack={handleDetailBack} />
+      <LabelDetail labelId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} />
     ) : (
-      <ArtistDetail artistId={selected.id} onBack={handleDetailBack} />
+      <ArtistDetail artistId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} />
     )
   }
 
@@ -99,7 +114,7 @@ export default function ArtistView(): React.JSX.Element {
           onQueryChange={setQuery}
           placeholder="搜索艺术家或厂牌"
           searchLabel="搜索艺术家或厂牌"
-          sortControl={<ArtistSortControl value={sort} onChange={setSort} />}
+          sortControl={<ArtistSortControl value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
           count={filteredItems.length}
           countUnit="位"
         />
@@ -144,10 +159,11 @@ export default function ArtistView(): React.JSX.Element {
 interface ArtistDetailProps {
   artistId: number
   onBack: () => void
+  onDeleted: () => void
 }
 
 /* 艺术家二级详情页：聚合展示该艺术家在 song_artists 表中关联的全部曲目 */
-function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Element {
+function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React.JSX.Element {
   const [artist, setArtist] = useState<ArtistRow | null>(null)
   const [aliasOf, setAliasOf] = useState<ArtistAliasOf | null>(null)
   const [members, setMembers] = useState<ArtistRow[]>([])
@@ -157,13 +173,17 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
   const [editingArtist, setEditingArtist] = useState(false)
   const [pictureVersion, setPictureVersion] = useState(0)
   const [sort, setSort] = useState<SongListSort>('library')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [query, setQuery] = useState('')
   const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
 
   useEffect(() => {
     setLoading(true)
     window.api.artists.detail(artistId).then((detail) => {
-      if (!detail) return
+      if (!detail) {
+        onDeleted()
+        return
+      }
       setArtist(detail.artist)
       setMembers(detail.members)
       setAliasOf(detail.aliasOf)
@@ -177,11 +197,19 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
     () => filterSongs(songs, query, [artist?.name ?? '']),
     [artist?.name, query, songs]
   )
-  const sortedSongs = useMemo(() => sortSongs(filteredSongs, sort), [filteredSongs, sort])
+  const sortedSongs = useMemo(() => sortSongs(filteredSongs, sort, sortDirection), [filteredSongs, sort, sortDirection])
+
+  function handleSortChange(nextSort: SongListSort): void {
+    setSort(nextSort)
+    setSortDirection(nextSort === 'title' ? 'asc' : 'desc')
+  }
 
   function refresh(): void {
     window.api.artists.detail(artistId).then((detail) => {
-      if (!detail) return
+      if (!detail) {
+        onDeleted()
+        return
+      }
       setArtist(detail.artist)
       setMembers(detail.members)
       setAliasOf(detail.aliasOf)
@@ -225,7 +253,9 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
           query={query}
           onQueryChange={setQuery}
           sort={sort}
-          onSortChange={setSort}
+          onSortChange={handleSortChange}
+          direction={sortDirection}
+          onDirectionChange={setSortDirection}
           count={filteredSongs.length}
           searchLabel="搜索当前艺术家"
           children={<RandomPlayButton onClick={() => playRandomQueue(sortedSongs.map(toMusicPlayerTrack))} disabled={sortedSongs.length === 0} />}
@@ -274,7 +304,7 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
             setPictureVersion((v) => v + 1)
             refresh()
           }}
-          onDeleted={onBack}
+          onDeleted={onDeleted}
           onPictureChanged={() => setPictureVersion((v) => v + 1)}
         />
       )}
@@ -285,13 +315,14 @@ function ArtistDetail({ artistId, onBack }: ArtistDetailProps): React.JSX.Elemen
 interface LabelDetailProps {
   labelId: number
   onBack: () => void
+  onDeleted: () => void
 }
 
 /*
  * 厂牌二级详情页：按专辑分组展示旗下全部曲目（组内按碟号/曲目号排序），
  * 双击任一曲目将播放队列重置为该厂牌下全部专辑的全部曲目（跨专辑按分组顺序拼接）。
  */
-function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
+function LabelDetail({ labelId, onBack, onDeleted }: LabelDetailProps): React.JSX.Element {
   const [label, setLabel] = useState<ArtistRow | null>(null)
   const [members, setMembers] = useState<ArtistRow[]>([])
   const [groups, setGroups] = useState<LabelAlbumGroup[]>([])
@@ -300,12 +331,16 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
   const [editingLabel, setEditingLabel] = useState(false)
   const [pictureVersion, setPictureVersion] = useState(0)
   const [sort, setSort] = useState<SongListSort>('library')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [query, setQuery] = useState('')
   const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
 
   function load(): void {
     window.api.artists.labelDetail(labelId).then((detail) => {
-      if (!detail) return
+      if (!detail) {
+        onDeleted()
+        return
+      }
       setLabel(detail.label)
       setMembers(detail.members)
       setGroups(detail.groups)
@@ -330,10 +365,15 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
     [groups, label?.name, query]
   )
   const sortedGroups = useMemo(
-    () => filteredGroups.map((group) => ({ ...group, songs: sortSongs(group.songs, sort) })),
-    [filteredGroups, sort]
+    () => filteredGroups.map((group) => ({ ...group, songs: sortSongs(group.songs, sort, sortDirection) })),
+    [filteredGroups, sort, sortDirection]
   )
   const allSongs = sortedGroups.flatMap((g) => g.songs)
+
+  function handleSortChange(nextSort: SongListSort): void {
+    setSort(nextSort)
+    setSortDirection(nextSort === 'title' ? 'asc' : 'desc')
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -369,7 +409,9 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
           query={query}
           onQueryChange={setQuery}
           sort={sort}
-          onSortChange={setSort}
+          onSortChange={handleSortChange}
+          direction={sortDirection}
+          onDirectionChange={setSortDirection}
           count={allSongs.length}
           searchLabel="搜索当前厂牌"
           children={<RandomPlayButton onClick={() => playRandomQueue(allSongs.map(toMusicPlayerTrack))} disabled={allSongs.length === 0} />}
@@ -437,6 +479,7 @@ function LabelDetail({ labelId, onBack }: LabelDetailProps): React.JSX.Element {
             setPictureVersion((v) => v + 1)
             load()
           }}
+          onDeleted={onDeleted}
           onPictureChanged={() => setPictureVersion((v) => v + 1)}
         />
       )}

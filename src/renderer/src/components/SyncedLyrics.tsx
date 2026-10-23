@@ -92,7 +92,7 @@ export default function SyncedLyrics({ lyric, currentTime, isPlaying, onSeek }: 
         return
       }
       resumeFollowing()
-    }, 5000)
+    }, 4000)
   }, [resumeFollowing])
 
   const pauseFollowing = useCallback((): void => {
@@ -139,7 +139,7 @@ export default function SyncedLyrics({ lyric, currentTime, isPlaying, onSeek }: 
   }, [])
 
   if (!lyric?.trim()) {
-    return <div className="flex h-full items-center justify-center text-sm text-neutral-500">暂无歌词</div>
+    return <div className="flex h-full items-center justify-center text-sm text-neutral-400">暂无歌词</div>
   }
 
   if (lines.length === 0) {
@@ -149,12 +149,12 @@ export default function SyncedLyrics({ lyric, currentTime, isPlaying, onSeek }: 
           onWheel={handleWheel}
           onPointerDown={pauseFollowing}
           onTouchStart={pauseFollowing}
-          className="h-full overflow-y-auto overscroll-contain whitespace-pre-wrap px-6 py-24 text-center text-lg leading-9 text-neutral-300 [scrollbar-width:none]"
+          className="h-full overflow-y-auto overscroll-contain whitespace-pre-wrap px-6 py-16 text-center text-lg leading-9 text-neutral-300 [scrollbar-width:none]"
         >
           {lyric}
         </div>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#101114] via-[#101114]/85 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#101114] via-[#101114]/85 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-player via-player/85 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-player via-player/85 to-transparent" />
       </div>
     )
   }
@@ -168,7 +168,7 @@ export default function SyncedLyrics({ lyric, currentTime, isPlaying, onSeek }: 
         onTouchStart={pauseFollowing}
         className="h-full overflow-y-auto overscroll-contain px-6 [scrollbar-width:none]"
       >
-        <div className="before:block before:h-[50vh] after:block after:h-[50vh]">
+        <div className="before:block before:h-[40vh] after:block after:h-[40vh]">
           {lines.map((line, index) => (
             <p
               key={`${line.time}-${index}`}
@@ -189,8 +189,8 @@ export default function SyncedLyrics({ lyric, currentTime, isPlaying, onSeek }: 
           ))}
         </div>
       </div>
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#101114] via-[#101114]/85 to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#101114] via-[#101114]/85 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-player via-player/85 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-player via-player/85 to-transparent" />
     </div>
   )
 }

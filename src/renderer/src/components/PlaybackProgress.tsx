@@ -83,7 +83,8 @@ export default function PlaybackProgress({ currentTime, duration, isPlaying, onS
         onBlur={commitPreview}
         aria-label="播放进度"
       />
-      <span className="w-14 shrink-0 whitespace-nowrap">{formatTime(duration)}</span>
+      {/* 总时长与扫描/入库的四舍五入规则一致；进度与音频排程仍使用精确秒数。 */}
+      <span className="w-14 shrink-0 whitespace-nowrap">{formatTime(Math.round(duration))}</span>
       {trailing}
     </div>
   )

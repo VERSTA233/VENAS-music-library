@@ -29,7 +29,7 @@ export default function BrowseToolbarActions({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={placeholder}
-          className="h-full w-full min-w-0 bg-transparent py-1 pl-8 pr-7 text-xs text-neutral-200 placeholder:text-neutral-600"
+          className="h-full w-full min-w-0 bg-transparent py-1 pl-8 pr-7 text-xs text-neutral-200"
           aria-label={searchLabel}
         />
         {query && (

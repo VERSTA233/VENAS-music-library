@@ -4,6 +4,7 @@ import type { AppendEntry } from '../../../shared/types'
 import SongForm, { type SongFormValue } from './SongForm'
 import { useAlbumSubmitGuard } from './AlbumSubmitGuard'
 import { usePlayerStore, type PlayerTrack } from '../stores/playerStore'
+import { useLibraryStore } from '../stores/libraryStore'
 
 interface IngestModalProps {
   entry: AppendEntry
@@ -132,6 +133,7 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
             appendEntry: null
           }
       usePlayerStore.getState().promoteAppendTrack(entry.fileName, promotedTrack)
+      useLibraryStore.getState().invalidateSongs()
       if (result.coverCacheFailed) {
         setCoverWarning(true)
         return
@@ -159,13 +161,13 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
   }
 
   return (
-    <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`}>
+    <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`} role="dialog" aria-modal="true" aria-labelledby="ingest-modal-title">
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`modal-scroll flex w-[min(680px,calc(100vw-2rem))] flex-col gap-5 overflow-y-auto rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 p-6 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}
+        className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}
       >
-        <div className="window-drag-region flex items-center justify-between">
-          <h2 className="text-base font-medium">添加到音乐库</h2>
+        <div className="window-drag-region flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
+          <h2 id="ingest-modal-title" className="text-base font-semibold text-white">添加到音乐库</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -183,41 +185,45 @@ export default function IngestModal({ entry, onClose, onIngested }: IngestModalP
           </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-neutral-500">文件名</label>
-          <input
-            value={targetFileName}
-            onChange={(e) => setTargetFileName(e.target.value)}
-            className="bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
-          />
-        </div>
+        <div className="modal-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-neutral-500">文件名</label>
+              <input
+                value={targetFileName}
+                onChange={(e) => setTargetFileName(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
+              />
+            </div>
 
-        <SongForm value={form} onChange={setForm} />
+            <SongForm value={form} onChange={setForm} />
 
-        {error && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2">{error}</div>}
-        {coverWarning && (
-          <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
-            歌曲已入库成功，但封面缓存写入失败，Music 列表将显示占位图。可稍后通过"重载音频文件"重试或手动上传封面。
+            {error && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2">{error}</div>}
+            {coverWarning && (
+              <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
+                歌曲已入库成功，但封面缓存写入失败，Music 列表将显示占位图。可稍后通过"重载音频文件"重试或手动上传封面。
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={onClose} className="text-sm px-3 py-1.5 rounded hover:bg-white/10 text-neutral-400">
+                取消
+              </button>
+              {coverWarning ? (
+                <button onClick={onIngested} className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30">
+                  知道了
+                </button>
+              ) : (
+                <button
+                  onClick={handleIngest}
+                  disabled={submitting || !form.title.trim() || !targetFileName.trim()}
+                  className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {submitting ? '入库中...' : '确认入库'}
+                </button>
+              )}
+            </div>
           </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded hover:bg-white/10 text-neutral-400">
-            取消
-          </button>
-          {coverWarning ? (
-            <button onClick={onIngested} className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30">
-              知道了
-            </button>
-          ) : (
-            <button
-              onClick={handleIngest}
-              disabled={submitting || !form.title.trim() || !targetFileName.trim()}
-              className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {submitting ? '入库中...' : '确认入库'}
-            </button>
-          )}
         </div>
       </div>
       {albumGuard.dialog}

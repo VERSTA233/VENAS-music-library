@@ -1,5 +1,5 @@
 import { Search, X } from 'lucide-react'
-import type { SongListSort } from '../../../shared/types'
+import type { SongListSort, SortDirection } from '../../../shared/types'
 import SongSortControl from './SongSortControl'
 
 interface SongListToolbarActionsProps {
@@ -7,6 +7,8 @@ interface SongListToolbarActionsProps {
   onQueryChange: (query: string) => void
   sort: SongListSort
   onSortChange: (sort: SongListSort) => void
+  direction?: SortDirection
+  onDirectionChange?: (direction: SortDirection) => void
   count: number
   searchLabel: string
   showSort?: boolean
@@ -19,6 +21,8 @@ export default function SongListToolbarActions({
   onQueryChange,
   sort,
   onSortChange,
+  direction = 'desc',
+  onDirectionChange,
   count,
   searchLabel,
   showSort = true,
@@ -32,7 +36,7 @@ export default function SongListToolbarActions({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="搜索歌曲、艺术家、专辑或厂牌"
-          className="h-full w-full min-w-0 bg-transparent py-1 pl-8 pr-7 text-xs text-neutral-200 placeholder:text-neutral-600"
+          className="h-full w-full min-w-0 bg-transparent py-1 pl-8 pr-7 text-xs text-neutral-200"
           aria-label={searchLabel}
         />
         {query && (
@@ -47,7 +51,7 @@ export default function SongListToolbarActions({
           </button>
         )}
       </label>
-      {showSort && <SongSortControl value={sort} onChange={onSortChange} />}
+      {showSort && onDirectionChange && <SongSortControl value={sort} onChange={onSortChange} direction={direction} onDirectionChange={onDirectionChange} />}
       <span className="shrink-0 text-xs tabular-nums text-neutral-500">{count} 首</span>
       {children}
     </div>

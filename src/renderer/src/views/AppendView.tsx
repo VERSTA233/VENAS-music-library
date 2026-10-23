@@ -150,7 +150,7 @@ export default function AppendView(): React.JSX.Element {
       )}
       {neteaseResult && (
         <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${currentIndex !== null ? ' pb-[92px]' : ''}`} role="dialog" aria-modal="true" aria-labelledby="netease-import-title">
-          <div className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${currentIndex !== null ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
+          <div className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${currentIndex !== null ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
             <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
               <div className="flex items-baseline gap-3">
                 <h2 id="netease-import-title" className="text-base font-semibold text-white">新加入的音乐</h2>

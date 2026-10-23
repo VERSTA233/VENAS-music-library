@@ -10,6 +10,13 @@ interface CoverProps {
 /* 通用封面缩略图：异步取二进制数据转成 objectURL 展示，取不到时留空白占位；卸载/切换时释放旧 URL 避免泄漏 */
 export default function Cover({ cacheKey, load, className }: CoverProps): React.JSX.Element {
   const [url, setUrl] = useState<string | null>(null)
+  const [version, setVersion] = useState(0)
+
+  useEffect(() => {
+    const refresh = (): void => setVersion((value) => value + 1)
+    window.addEventListener('library:cover-updated', refresh)
+    return () => window.removeEventListener('library:cover-updated', refresh)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -26,7 +33,7 @@ export default function Cover({ cacheKey, load, className }: CoverProps): React.
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cacheKey])
+  }, [cacheKey, version])
 
   return url ? (
     <img src={url} className={className} alt="" draggable={false} />

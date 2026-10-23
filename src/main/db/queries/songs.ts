@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { SongListItem, SongDetail, SongListSort } from '../../../shared/types'
+import type { SongListItem, SongDetail, SongListSort, SortDirection } from '../../../shared/types'
 import { buildSearchTerms } from '../../../shared/searchTerms'
 import { getSongAlbum } from './albums'
 import { withArtistNames } from './songList'
@@ -13,12 +13,14 @@ export interface SongArtistInput {
 }
 
 /* 查询完整 Music 库歌曲列表，含拼装好的艺术家显示字符串（按 role=Primary 优先、artist_order 排序）。 */
-export function listSongs(db: Database.Database, sort: SongListSort = 'library', query = ''): SongListItem[] {
+export function listSongs(db: Database.Database, sort: SongListSort = 'library', query = '', direction: SortDirection = 'desc'): SongListItem[] {
   const normalizedSort: SongListSort = sort === 'title' || sort === 'addedAt' ? sort : 'library'
+  const normalizedDirection: SortDirection = direction === 'asc' ? 'asc' : 'desc'
+  const order = normalizedDirection === 'asc' ? 'ASC' : 'DESC'
   const orderBy = {
-    library: 's.id DESC',
-    title: 's.title COLLATE NOCASE ASC, s.id DESC',
-    addedAt: 'si.add_time IS NULL ASC, si.add_time DESC, s.id DESC'
+    library: `s.id ${order}`,
+    title: `s.title COLLATE NOCASE ${order}, s.id ${order}`,
+    addedAt: `si.add_time IS NULL ASC, si.add_time ${order}, s.id ${order}`
   }[normalizedSort]
   const search = buildSongSearch(query)
   const rows = db.prepare(

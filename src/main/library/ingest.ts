@@ -9,6 +9,13 @@ import { createAlbum, updateAlbumFields, setSongAlbum, setAlbumArtists, type Alb
 import { createSong, setSongArtists, setSongTags, isFileNameTaken, type SongArtistInput } from '../db/queries/songs'
 import { createSongInfoOnIngest } from '../db/queries/songInfo'
 import { updateSongCover } from './coverCache'
+import {
+  addAlbumOrphanCandidates,
+  cleanupOrphanCandidates,
+  createOrphanCandidates,
+  removeOrphanPictures,
+  type OrphanCleanupResult
+} from './orphanCleanup'
 import type { IngestRequest, IngestResult } from '../../shared/types'
 
 export type { IngestRequest, IngestResult }
@@ -50,7 +57,7 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
   }
 
   // 入库前先提取元数据（时长、封面），此时文件仍在 Append
-  const meta = await parseFile(sourcePath)
+  const meta = await parseFile(sourcePath, { duration: true })
   const length = meta.format.duration ? Math.round(meta.format.duration) : null
   const cover = meta.common.picture?.[0] ? Buffer.from(meta.common.picture[0].data) : null
   // add_time 记录音频文件本身的修改时间，而非入库操作发生的时刻；需在文件被移动前读取
@@ -59,6 +66,9 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
   renameSync(sourcePath, targetPath)
 
   let songId: number
+  const orphanCandidates = createOrphanCandidates()
+  if (req.album?.albumId != null) addAlbumOrphanCandidates(db, orphanCandidates, req.album.albumId)
+  let cleanupResult: OrphanCleanupResult = { albumIds: [], artistIds: [] }
   try {
     songId = db.transaction(() => {
       const id = createSong(db, {
@@ -106,6 +116,7 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
       }
 
       createSongInfoOnIngest(db, id, addTime, req.firstHeardDate, req.score, req.comment)
+      cleanupResult = cleanupOrphanCandidates(db, orphanCandidates)
 
       return id
     })()
@@ -114,6 +125,7 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
     renameSync(targetPath, sourcePath)
     throw err
   }
+  removeOrphanPictures(paths, cleanupResult)
 
   // 歌词已写入 songs.lyric，源歌词文件（自动匹配到的或用户通过对话框选中的，可能不在 Append 目录内）不再需要，删除失败不影响入库结果
   if (req.lyricFilePath) {

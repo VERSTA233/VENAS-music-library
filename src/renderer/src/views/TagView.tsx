@@ -233,7 +233,7 @@ function TagTypeDetail({ tagType, onBack, onSelectTag, onTypeCountChanged }: Tag
               if (e.key === 'Enter') handleCreate()
             }}
             placeholder="新建 Tag 名称"
-            className="h-8 w-[clamp(10rem,20vw,18rem)] min-w-0 rounded-lg border border-white/[0.08] bg-white/[0.06] px-3 text-xs text-neutral-100 placeholder:text-neutral-600 outline-none transition focus:border-white/[0.2] focus:bg-white/[0.08]"
+            className="h-8 w-[clamp(10rem,20vw,18rem)] min-w-0 rounded-lg border border-white/[0.08] bg-white/[0.06] px-3 text-xs text-neutral-100 outline-none transition focus:border-white/[0.2] focus:bg-white/[0.08]"
             aria-label="新建 Tag 名称"
           />
           <button

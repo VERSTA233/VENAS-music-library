@@ -8,7 +8,7 @@ interface LabelPickerProps {
   disabled?: boolean
 }
 
-/* 多厂牌选择器：每个值独立匹配 type='Label'，支持搜索、键盘提交与删除。 */
+/* 多厂牌选择器：每个值独立匹配 type='Label'，Tab/Enter 接受首个搜索结果。 */
 export default function LabelPicker({ values, onChange, disabled = false }: LabelPickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<ArtistRow[]>([])
@@ -89,18 +89,18 @@ export default function LabelPicker({ values, onChange, disabled = false }: Labe
           }}
           onBlur={() => addLabel(query)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === 'Tab') {
-              const nextLabel = suggestions[0]?.name ?? query
-              if (nextLabel.trim()) {
-                event.preventDefault()
-                addLabel(nextLabel)
-              }
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              addLabel(suggestions[0]?.name ?? query)
+            } else if (event.key === 'Tab' && suggestions[0]) {
+              event.preventDefault()
+              addLabel(suggestions[0].name)
             } else if (event.key === 'Backspace' && !query && values.length > 0) {
               removeLabel(values.length - 1)
             }
           }}
           placeholder={values.length === 0 ? '搜索或输入厂牌' : '添加厂牌'}
-          className="min-w-32 flex-1 border-b border-transparent bg-transparent py-1 text-sm outline-none transition focus:border-white/30 disabled:opacity-40"
+          className="min-w-32 flex-1 border-b border-transparent bg-transparent py-1 text-sm text-neutral-100 outline-none transition focus:border-white/30 disabled:opacity-40"
         />
       </div>
       {open && suggestions.length > 0 && (

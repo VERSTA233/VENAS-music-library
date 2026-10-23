@@ -4,6 +4,7 @@ import type { ArtistAliasOf, ArtistAliasType, ArtistRow } from '../../../shared/
 import Cover from './Cover'
 import ArtistMemberPicker from './ArtistMemberPicker'
 import { usePlayerStore } from '../stores/playerStore'
+import { useLibraryStore } from '../stores/libraryStore'
 
 interface ArtistEditModalProps {
   artist: ArtistRow
@@ -11,6 +12,7 @@ interface ArtistEditModalProps {
   aliasOf?: ArtistAliasOf | null
   allowTypeEdit?: boolean
   allowManagement?: boolean
+  allowDelete?: boolean
   onClose: () => void
   onSaved: () => void
   onDeleted?: () => void
@@ -31,6 +33,7 @@ export default function ArtistEditModal({
   aliasOf = null,
   allowTypeEdit = true,
   allowManagement = true,
+  allowDelete = true,
   onClose,
   onSaved,
   onDeleted,
@@ -97,6 +100,7 @@ export default function ArtistEditModal({
         country: country.trim() || null,
         memberIds: selectedMembers.map((member) => member.id)
       })
+      useLibraryStore.getState().invalidateSongs()
       onSaved()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -110,6 +114,7 @@ export default function ArtistEditModal({
     setError(null)
     try {
       await window.api.artists.delete(artist.id)
+      useLibraryStore.getState().invalidateSongs()
       onDeleted?.()
       onClose()
     } catch (reason) {
@@ -125,6 +130,7 @@ export default function ArtistEditModal({
     setError(null)
     try {
       await window.api.artists.merge(artist.id, mergeTarget.id)
+      useLibraryStore.getState().invalidateSongs()
       onDeleted?.()
       onClose()
     } catch (reason) {
@@ -140,6 +146,7 @@ export default function ArtistEditModal({
     setError(null)
     try {
       await window.api.artists.setAlias(artist.id, mergeTarget.id, aliasType)
+      useLibraryStore.getState().invalidateSongs()
       onSaved()
       onClose()
     } catch (reason) {
@@ -159,13 +166,19 @@ export default function ArtistEditModal({
   const busy = saving || uploading || deleting || merging
   const effectiveType = allowTypeEdit ? type || null : artist.type
   const supportsMembers = effectiveType === 'Group' || effectiveType === 'Label'
+  const entityLabel = artist.type === 'Label' ? '厂牌' : '艺术家'
 
   return (
     <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`} role="dialog" aria-modal="true" aria-labelledby="artist-edit-title">
-      <div className={`flex w-[min(560px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#1b1b1f]/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
+      <div className={`flex w-[min(560px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
         <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
           <h2 id="artist-edit-title" className="truncate text-base font-semibold text-white">编辑 {artist.name}</h2>
-          <button type="button" onClick={onClose} disabled={busy} className="library-icon-button disabled:opacity-30" title="关闭" aria-label="关闭"><X size={18} /></button>
+          <div className="flex items-center gap-2">
+            {allowDelete && (
+              <button type="button" onClick={() => chooseManagementMode(managementMode === 'delete' ? null : 'delete')} disabled={busy} className="library-icon-button text-neutral-500 hover:text-red-300 disabled:opacity-30" title={`删除${entityLabel}`} aria-label={`删除${entityLabel}`}><Trash2 size={16} /></button>
+            )}
+            <button type="button" onClick={onClose} disabled={busy} className="library-icon-button disabled:opacity-30" title="关闭" aria-label="关闭"><X size={18} /></button>
+          </div>
         </div>
         <div className="modal-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="flex items-center gap-3">
@@ -209,18 +222,17 @@ export default function ArtistEditModal({
             )}
           </div>
 
-          {allowManagement && (
+          {(allowManagement || (allowDelete && managementMode === 'delete')) && (
             <div className="mt-6 border-t border-white/[0.08] pt-5">
-              {managementMode === null && (
+              {allowManagement && managementMode === null && (
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={() => chooseManagementMode('merge')} disabled={busy} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30"><GitMerge size={16} />合并艺术家</button>
                   {!aliasOf && <button type="button" onClick={() => chooseManagementMode('alias')} disabled={busy} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30"><GitMerge size={16} />设为别名</button>}
-                  <button type="button" onClick={() => chooseManagementMode('delete')} disabled={busy} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-300 transition hover:bg-red-400/[0.1] disabled:opacity-30"><Trash2 size={16} />删除艺术家</button>
                 </div>
               )}
               {managementMode === 'delete' && (
                 <div>
-                  <p className="text-sm leading-6 text-red-100">删除后会解除该艺术家与所有歌曲、专辑的关联，并删除头像。歌曲、专辑及音频文件会被保留，无法恢复。</p>
+                  <p className="text-sm leading-6 text-red-100">删除后会解除该{entityLabel}与所有歌曲、专辑的关联，并删除头像。歌曲、专辑及音频文件会被保留，无法恢复。</p>
                   <div className="mt-4 flex justify-end gap-2">
                     <button type="button" onClick={() => chooseManagementMode(null)} disabled={deleting} className="rounded-lg px-3 py-2 text-sm text-neutral-400 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30">取消</button>
                     <button type="button" onClick={handleDelete} disabled={deleting} className="rounded-lg bg-red-300 px-3 py-2 text-sm font-medium text-black transition hover:bg-red-200 disabled:opacity-30">{deleting ? '正在删除...' : '确认删除'}</button>

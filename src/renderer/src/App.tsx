@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Disc3, FolderInput, LibraryBig, Music2, Settings, Tags, UsersRound } from 'lucide-react'
-import type { PlaybackSession } from '../../shared/types'
+import type { LibraryMaintenanceState, PlaybackSession } from '../../shared/types'
 import AppendView from './views/AppendView'
 import MusicView from './views/MusicView'
 import ArtistView from './views/ArtistView'
@@ -8,6 +8,7 @@ import AlbumView from './views/AlbumView'
 import TagView from './views/TagView'
 import SettingsView from './views/SettingsView'
 import BottomPlayerBar from './components/BottomPlayerBar'
+import AudioEngine from './playback/AudioEngine'
 import FullPlayer from './components/FullPlayer'
 import { usePlayerStore } from './stores/playerStore'
 import { useNavStore, type NavTarget, type ViewKey } from './stores/navStore'
@@ -37,9 +38,28 @@ export default function App(): React.JSX.Element {
   const [view, setView] = useState<ViewKey | null>(null)
   const [viewEpoch, setViewEpoch] = useState(0)
   const [fullPlayerOpen, setFullPlayerOpen] = useState(false)
+  const [maintenance, setMaintenance] = useState<LibraryMaintenanceState | null>(null)
   const togglePlay = usePlayerStore((s) => s.togglePlay)
   const navTarget = useNavStore((s) => s.target)
   const restoreSignal = useNavStore((s) => s.restoreSignal)
+
+  useEffect(() => {
+    let disposed = false
+    let receivedUpdate = false
+    function apply(state: LibraryMaintenanceState | null): void {
+      if (disposed) return
+      setMaintenance(state)
+      if (state && usePlayerStore.getState().isPlaying) usePlayerStore.getState().setPlaying(false)
+    }
+    const unsubscribe = window.api.library.onMaintenanceChange((state) => {
+      receivedUpdate = true
+      apply(state)
+    })
+    window.api.library.getMaintenanceState().then((state) => {
+      if (!receivedUpdate) apply(state)
+    }).catch(() => undefined)
+    return () => { disposed = true; unsubscribe() }
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -85,7 +105,8 @@ export default function App(): React.JSX.Element {
       window.api.playback.saveSession(sessionFromState()).catch(() => undefined)
     }
 
-    const unsubscribe = usePlayerStore.subscribe(() => {
+    const unsubscribe = usePlayerStore.subscribe((state, previous) => {
+      if (state.queue === previous.queue && state.currentIndex === previous.currentIndex && state.currentTime === previous.currentTime && state.playbackMode === previous.playbackMode && state.shuffleOrder === previous.shuffleOrder) return
       if (!restored) {
         if (!applyingRestore) changedBeforeRestore = true
         return
@@ -131,6 +152,7 @@ export default function App(): React.JSX.Element {
   /* 全局快捷键：空格键切换播放/暂停（当前没有播放曲目时 togglePlay 内部本身就是空操作） */
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
+      if (maintenance) return
       if (e.code === 'Escape' && fullPlayerOpen) {
         e.preventDefault()
         setFullPlayerOpen(false)
@@ -142,7 +164,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [togglePlay, fullPlayerOpen])
+  }, [togglePlay, fullPlayerOpen, maintenance])
 
   function handleFullPlayerNavigate(target: Extract<NavTarget, { view: 'artist' | 'album' }>): void {
     setView(target.view)
@@ -159,56 +181,76 @@ export default function App(): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0e0e10]">
-      <div className="flex flex-1 min-h-0">
-        <aside className="relative flex w-60 shrink-0 flex-col border-r border-white/[0.08] bg-[#151518]/88 px-3 pb-5 pt-[3.75rem] backdrop-blur-2xl">
-          <div className="window-drag-region absolute inset-x-0 top-0 h-12" aria-hidden="true" />
-          <div className="mb-7 flex items-center gap-2.5 px-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black shadow-sm"><Music2 size={17} strokeWidth={2.2} /></div>
-            <span className="text-sm font-semibold text-white">VENAS</span>
-          </div>
+    <>
+      <AudioEngine />
+      <div inert={maintenance != null} className="flex h-screen flex-col overflow-hidden bg-app">
+        <div className="flex flex-1 min-h-0">
+          <aside className="relative flex w-60 shrink-0 flex-col border-r border-white/[0.08] bg-sidebar/88 px-3 pb-5 pt-[3.75rem] backdrop-blur-2xl">
+            <div className="window-drag-region absolute inset-x-0 top-0 h-12" aria-hidden="true" />
+            <div className="mb-7 flex items-center gap-2.5 px-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black shadow-sm"><Music2 size={17} strokeWidth={2.2} /></div>
+              <span className="text-sm font-semibold text-white">VENAS</span>
+            </div>
 
-          <SidebarSection label="音乐库">
-            <NavItem label="Append" icon={<FolderInput size={17} />} active={view === 'append'} onClick={() => handleSidebarNavigation('append')} />
-            <NavItem label="Music" icon={<LibraryBig size={17} />} active={view === 'music'} onClick={() => handleSidebarNavigation('music')} />
-          </SidebarSection>
+            <SidebarSection label="音乐库">
+              <NavItem label="Append" icon={<FolderInput size={17} />} active={view === 'append'} onClick={() => handleSidebarNavigation('append')} />
+              <NavItem label="Music" icon={<LibraryBig size={17} />} active={view === 'music'} onClick={() => handleSidebarNavigation('music')} />
+            </SidebarSection>
 
-          <SidebarSection label="分类">
-            <NavItem label="Artist" icon={<UsersRound size={17} />} active={view === 'artist'} onClick={() => handleSidebarNavigation('artist')} />
-            <NavItem label="Album" icon={<Disc3 size={17} />} active={view === 'album'} onClick={() => handleSidebarNavigation('album')} />
-            <NavItem label="Tag" icon={<Tags size={17} />} active={view === 'tag'} onClick={() => handleSidebarNavigation('tag')} />
-          </SidebarSection>
+            <SidebarSection label="分类">
+              <NavItem label="Artist" icon={<UsersRound size={17} />} active={view === 'artist'} onClick={() => handleSidebarNavigation('artist')} />
+              <NavItem label="Album" icon={<Disc3 size={17} />} active={view === 'album'} onClick={() => handleSidebarNavigation('album')} />
+              <NavItem label="Tag" icon={<Tags size={17} />} active={view === 'tag'} onClick={() => handleSidebarNavigation('tag')} />
+            </SidebarSection>
 
-          <div className="mt-auto border-t border-white/[0.08] pt-4">
-            <NavItem label="设置" icon={<Settings size={17} />} active={view === 'settings'} onClick={() => handleSidebarNavigation('settings')} />
-          </div>
-        </aside>
+            <div className="mt-auto border-t border-white/[0.08] pt-4">
+              <NavItem label="设置" icon={<Settings size={17} />} active={view === 'settings'} onClick={() => handleSidebarNavigation('settings')} />
+            </div>
+          </aside>
 
-        <main className="min-w-0 flex-1 bg-[#101012]">
-          {view === 'append' && <AppendView key={`append-${viewEpoch}`} />}
-          {view === 'music' && <MusicView key={`music-${viewEpoch}`} />}
-          {view === 'artist' && <ArtistView key={`artist-${viewEpoch}`} />}
-          {view === 'album' && <AlbumView key={`album-${viewEpoch}`} />}
-          {view === 'tag' && <TagView key={`tag-${viewEpoch}`} />}
-          {view === 'settings' && <SettingsView key={`settings-${viewEpoch}`} />}
-        </main>
+          <main className="min-w-0 flex-1 bg-content">
+            {view === 'append' && <AppendView key={`append-${viewEpoch}`} />}
+            {view === 'music' && <MusicView key={`music-${viewEpoch}`} />}
+            {view === 'artist' && <ArtistView key={`artist-${viewEpoch}`} />}
+            {view === 'album' && <AlbumView key={`album-${viewEpoch}`} />}
+            {view === 'tag' && <TagView key={`tag-${viewEpoch}`} />}
+            {view === 'settings' && <SettingsView key={`settings-${viewEpoch}`} />}
+          </main>
+        </div>
+
+        <BottomPlayerBar hidden={fullPlayerOpen} onOpenFullPlayer={() => setFullPlayerOpen(true)} />
+        <FullPlayer open={fullPlayerOpen} onClose={() => setFullPlayerOpen(false)} onNavigate={handleFullPlayerNavigate} />
       </div>
+      {maintenance && <MaintenanceProgress state={maintenance} />}
+    </>
+  )
+}
 
-      <BottomPlayerBar hidden={fullPlayerOpen} onOpenFullPlayer={() => setFullPlayerOpen(true)} />
-      <FullPlayer open={fullPlayerOpen} onClose={() => setFullPlayerOpen(false)} onNavigate={handleFullPlayerNavigate} />
+function MaintenanceProgress({ state }: { state: LibraryMaintenanceState }): React.JSX.Element {
+  const labels = { waiting: '正在等待当前操作完成', copying: '正在复制系统数据', verifying: '正在校验文件', finishing: '迁移完成，正在清理并重启' }
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="maintenance-title">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-panel p-6 shadow-2xl">
+        <h2 id="maintenance-title" className="text-base font-semibold text-white">正在迁移系统目录</h2>
+        <p className="mt-2 text-sm text-neutral-400">操作已暂停，请保持应用开启。完成后会自动重启。</p>
+        <div className="mt-5 text-sm text-neutral-200" role="status" aria-live="polite">
+          {labels[state.phase]}{state.total > 0 ? `（${state.completed} / ${state.total}）` : '…'}
+        </div>
+        <progress aria-label={labels[state.phase]} value={state.total > 0 ? state.completed : undefined} max={state.total || 1} className="mt-3 h-2 w-full accent-white" />
+      </div>
     </div>
   )
 }
 
 function SidebarSection({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
-  return <section className="mb-6"><div className="mb-2 px-3 text-[11px] font-medium text-neutral-600">{label}</div><div className="space-y-0.5">{children}</div></section>
+  return <section className="mb-6"><div className="mb-2 px-3 text-[13px] font-medium text-neutral-600">{label}</div><div className="space-y-0.5">{children}</div></section>
 }
 
 function NavItem({ label, icon, active, onClick }: { label: string; icon: React.ReactNode; active: boolean; onClick: () => void }): React.JSX.Element {
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition active:scale-[0.98] ${
+      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[15px] transition active:scale-[0.98] ${
         active ? 'bg-white/[0.13] text-white shadow-sm' : 'text-neutral-400 hover:bg-white/[0.06] hover:text-white'
       }`}
     >

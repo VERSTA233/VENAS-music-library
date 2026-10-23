@@ -6,7 +6,10 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { settings } from './settings'
 import { initLibrary } from './library/init'
 import { runDailyBackup } from './library/backup'
+import { repairMissingOggDurations } from './library/repairDurations'
+import { getDatabase } from './db'
 import { registerIpcHandlers } from './ipc'
+import { colors } from '../shared/colors'
 import type { LibraryPaths } from './library/paths'
 import { resolveMigratedAppendSource, resolveMigratedMusicSource } from './library/migratedAppendSources'
 
@@ -21,7 +24,7 @@ let libraryPaths: LibraryPaths | null = null
  * 拖动进度条会整个重新请求、从头播放。这里手动解析 Range，用 fs 按字节区间读取并返回 206。
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'venas-media', privileges: { standard: true, stream: true, supportFetchAPI: true } }
+  { scheme: 'venas-media', privileges: { standard: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
 ])
 
 function createWindow(): void {
@@ -32,11 +35,13 @@ function createWindow(): void {
     autoHideMenuBar: true,
     /* 让 Web 内容延伸到交通灯区域，标题栏与侧栏/内容区使用同一套深色材质。 */
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#0e0e10',
+    backgroundColor: colors.app,
     webPreferences: {
       /* package.json 为 "type": "module"，electron-vite 会把 preload 输出为 .mjs，扩展名必须对上 */
       preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false
+      sandbox: false,
+      /* 最小化后仍需及时准备后续曲目并同步播放队列。 */
+      backgroundThrottling: false
     }
   })
 
@@ -120,7 +125,7 @@ function registerMediaProtocol(paths: LibraryPaths): void {
       const stream = streamForRequest(request, filePath)
       return new Response(stream, {
         status: 200,
-        headers: { 'Content-Type': mimeType, 'Content-Length': String(fileSize), 'Accept-Ranges': 'bytes' }
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': mimeType, 'Content-Length': String(fileSize), 'Accept-Ranges': 'bytes' }
       })
     }
 
@@ -139,6 +144,7 @@ function registerMediaProtocol(paths: LibraryPaths): void {
     return new Response(stream, {
       status: 206,
       headers: {
+        'Access-Control-Allow-Origin': '*',
         'Content-Type': mimeType,
         'Content-Length': String(end - start + 1),
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -188,6 +194,7 @@ app.whenReady().then(async () => {
 
   libraryPaths = initLibrary(root.musicRoot, root.systemRoot)
   runDailyBackup(libraryPaths)
+  await repairMissingOggDurations(libraryPaths, getDatabase())
   registerIpcHandlers(libraryPaths)
   registerMediaProtocol(libraryPaths)
 
