@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer'
 import { ListMusic, MoreHorizontal } from 'lucide-react'
 import { usePlayerStore } from '../stores/playerStore'
 import SongEditModal from './SongEditModal'
@@ -19,16 +20,7 @@ export default function BottomPlayerBar({ hidden, onOpenFullPlayer }: { hidden: 
   const playlistRef = useRef<HTMLDivElement>(null)
   const playlistTriggerRef = useRef<HTMLButtonElement>(null)
   const currentTrack = currentIndex == null ? null : queue[currentIndex] ?? null
-  useEffect(() => {
-    if (!playlistOpen) return
-    function closeOnOutsidePointer(event: PointerEvent): void {
-      const target = event.target as Node
-      if (playlistRef.current?.contains(target) || playlistTriggerRef.current?.contains(target)) return
-      setPlaylistOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
-  }, [playlistOpen])
+  useDismissibleLayer(playlistOpen, [playlistRef, playlistTriggerRef], () => setPlaylistOpen(false))
 
   if (!currentTrack) return null
   const track = currentTrack

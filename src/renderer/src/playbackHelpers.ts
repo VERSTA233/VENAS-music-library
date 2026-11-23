@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 
 /* 播放器各布局共用的时间显示格式。 */
-export function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds)) return '0:00'
-  const minutes = Math.floor(seconds / 60)
-  const remainder = Math.floor(seconds % 60)
+export function formatTime(seconds: number | null): string {
+  if (seconds == null) return '--:--'
+  const time = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+  const minutes = Math.floor(time / 60)
+  const remainder = Math.floor(time % 60)
   return `${minutes.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`
 }
 

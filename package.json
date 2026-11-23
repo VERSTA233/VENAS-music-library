@@ -6,13 +6,36 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
+    "predev": "node scripts/build-audio-tag-writer.mjs && node scripts/build-audio-inspector.mjs && node scripts/build-native-media.mjs",
+    "prebuild": "node scripts/build-audio-tag-writer.mjs && node scripts/build-audio-inspector.mjs && node scripts/build-native-media.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "postinstall": "electron-builder install-app-deps",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:playlist": "node scripts/test-node.mjs playlist",
+    "test:playback": "node scripts/test-node.mjs playback",
+    "test:playback:audio": "node scripts/test-ui.mjs tests/playbackAudio.ts --audio",
+    "test:audio-output:ui": "node scripts/test-ui.mjs tests/audioOutputSettingsUi.tsx",
+    "test:shared-ui": "node scripts/test-ui.mjs tests/sharedComponentsUi.tsx",
+    "test:lists:ui": "node scripts/test-ui.mjs tests/listPerformanceUi.tsx",
+    "test:covers": "node scripts/test-node.mjs covers",
+    "test:thumbnails": "node scripts/test-node.mjs thumbnails",
+    "test:tag-ordering": "node scripts/test-node.mjs tag-ordering",
+    "test:visualization:ui": "node scripts/test-ui.mjs tests/audioVisualizationUi.tsx",
+    "test:audio-tags:flac": "node --experimental-strip-types --test tests/flacTags.test.ts",
+    "test:audio-tags:id3": "node --test tests/id3TagWriter.test.mjs",
+    "test:audio-tags:containers": "node --test tests/containerTagWriter.test.mjs",
+    "test:audio-tags:failures": "node --experimental-strip-types --test tests/audioTagFailure.test.mjs",
+    "test:audio-tags:task": "node scripts/test-node.mjs audio-tag-writeback",
+    "test:audio-tags:ui": "node scripts/test-ui.mjs tests/audioTagWriteSettingsUi.tsx",
+    "test:audio-integrity": "node scripts/test-node.mjs audio-integrity",
+    "test:audio-integrity:ui": "node scripts/test-ui.mjs tests/audioIntegrityUi.tsx",
+    "test:artist-ingest": "node scripts/test-node.mjs artist-ingest",
+    "test:artist-aliases": "node scripts/test-node.mjs artist-aliases",
+    "test:artist-aliases:ui": "node scripts/test-ui.mjs tests/artistAliasUi.tsx",
+    "test:artist-members:ui": "node scripts/test-ui.mjs tests/artistMembersUi.tsx"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@tailwindcss/postcss": "^4.3.2",
@@ -20,7 +43,6 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
-    "autoprefixer": "^10.5.2",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
@@ -28,6 +50,19 @@
     "tailwindcss": "^4.3.2",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
+  },
+  "build": {
+    "extraResources": [
+      {
+        "from": "resources/audio-tags",
+        "to": "audio-tags",
+        "filter": [
+          "!build.json"
+        ]
+      },
+      { "from": "resources/audio-inspect", "to": "audio-inspect", "filter": ["!build.json", "!*.download", "!*.prepared"] },
+      { "from": "resources/native-media", "to": "native-media", "filter": ["*.node"] }
+    ]
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

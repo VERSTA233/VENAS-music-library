@@ -1,8 +1,9 @@
 import { ArrowDown, ArrowUp, Check, ChevronDown } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { SortDirection } from '../../../shared/types'
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer'
 
-export interface SortOption<T extends string> {
+interface SortOption<T extends string> {
   value: T
   label: string
 }
@@ -31,21 +32,7 @@ export default function SortMenu<T extends string>({
   const rootRef = useRef<HTMLDivElement>(null)
   const selected = options.find((option) => option.value === value) ?? options[0]
 
-  useEffect(() => {
-    if (!open) return
-    function closeOnOutsidePointer(event: PointerEvent): void {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    function closeOnEscape(event: KeyboardEvent): void {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsidePointer)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [open])
+  useDismissibleLayer(open, [rootRef], () => setOpen(false), true)
 
   return (
     <div ref={rootRef} className="relative flex h-8 shrink-0 items-center rounded-lg border border-white/[0.1] bg-white/[0.06] text-neutral-300 shadow-sm transition hover:border-white/[0.16] hover:bg-white/[0.1]">

@@ -6,10 +6,9 @@ import { getSongDetail, updateSongFields } from '../db/queries/songs'
 import { updateSongCover } from './coverCache'
 import { recordMigratedMusicSource } from './migratedAppendSources'
 import type { ReloadResult } from '../../shared/types'
+import { parseAudioMetadata as parseFile } from './audioMetadata'
 
-export type { ReloadResult }
-
-export class ReloadError extends Error {}
+class ReloadError extends Error {}
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.ape'])
 
@@ -121,7 +120,6 @@ export async function reloadAudioFile(
   let length: number | null | undefined
   let cover: Buffer | null = null
   if (replacing) {
-    const { parseFile } = await import('music-metadata')
     const metadata = await parseFile(sourcePath, { duration: true })
     length = metadata.format.duration ? Math.round(metadata.format.duration) : null
     cover = metadata.common.picture?.[0] ? Buffer.from(metadata.common.picture[0].data) : null
@@ -129,6 +127,10 @@ export async function reloadAudioFile(
 
   const caseOnlyRename = !replacing && oldFileName !== finalFileName && oldFileName.toLocaleLowerCase() === finalFileName.toLocaleLowerCase()
   const stagePath = stagingPath(paths, songId, oldFileName)
+  if (replacing) {
+    // 即使新音频恰好具有相同字节，也必须在替换前使写入记录失效。
+    db.prepare("UPDATE audio_tag_write_state SET status = 'pending', file_hash = NULL, error_info = NULL WHERE song_id = ?").run(songId)
+  }
   let oldStaged = false
   let sourceMoved = false
   try {
@@ -192,7 +194,6 @@ export async function reloadEmbeddedCover(paths: LibraryPaths, songId: number): 
   if (!song) throw new ReloadError('歌曲不存在')
   const audioPath = join(paths.music, song.file_name)
   if (!existsSync(audioPath)) throw new ReloadError('当前音频文件不存在')
-  const { parseFile } = await import('music-metadata')
   const metadata = await parseFile(audioPath)
   const picture = metadata.common.picture?.[0]
   if (!picture) throw new ReloadError('当前音频没有内嵌封面，原封面未更改')

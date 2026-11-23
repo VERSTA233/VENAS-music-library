@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Pencil, Trash2, X } from 'lucide-react'
+import { Check, Pencil, Trash2, X } from 'lucide-react'
 import type { ReloadFileSelection, SongDetail } from '../../../shared/types'
-import SongForm, { type SongFormValue } from './SongForm'
+import SongForm, { songFormMetadata, type SongFormValue } from './SongForm'
 import ReloadAudioPanel from './ReloadAudioPanel'
 import { useAlbumSubmitGuard } from './AlbumSubmitGuard'
+import { useArtistSubmitGuard } from './ArtistSubmitGuard'
 import { useNavStore, type NavTarget, type ReturnContext } from '../stores/navStore'
 import { usePlayerStore } from '../stores/playerStore'
 import { useLibraryStore } from '../stores/libraryStore'
+import { formatTime } from '../playbackHelpers'
 
 interface SongEditModalProps {
   songId: number
@@ -46,7 +48,7 @@ function detailToFormValue(d: SongDetail): SongFormValue {
     firstHeardDate: d.first_heard_date ?? '',
     lyric: d.lyric ?? '',
     lyricFilePath: null,
-    artists: d.artists.map((a) => ({ name: a.name, role: a.role, order: a.order, type: null })),
+    artists: d.artists.map((a) => ({ artistId: a.id, name: a.name, role: a.role, order: a.order, type: null })),
     tags: d.tags.map((t) => ({ id: t.id, name: t.name, tag_type: t.tag_type, description: null })),
     album: album
       ? (() => {
@@ -54,7 +56,7 @@ function detailToFormValue(d: SongDetail): SongFormValue {
           const albumType = album.album_type ?? 'Album'
           const totalDiscs = album.total_discs != null ? String(album.total_discs) : ''
           const labels = album.labels.map((label) => label.name)
-          const artists = album.artists.map((a) => ({ name: a.name, role: 'Primary', order: a.order, type: null }))
+          const artists = album.artists.map((a) => ({ artistId: a.id, name: a.name, role: 'Primary', order: a.order, type: null }))
           return {
             title: album.title,
             releaseDate,
@@ -73,11 +75,6 @@ function detailToFormValue(d: SongDetail): SongFormValue {
     score: d.score != null ? String(d.score) : '',
     comment: d.comment ?? ''
   }
-}
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return '--:--'
-  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
 }
 
 /*
@@ -103,6 +100,7 @@ export default function SongEditModal({
   const [saveError, setSaveError] = useState<string | null>(null)
   const { navigate } = useNavStore()
   const albumGuard = useAlbumSubmitGuard()
+  const artistGuard = useArtistSubmitGuard()
   const hasTrack = usePlayerStore((s) => s.currentIndex !== null)
 
   useEffect(() => {
@@ -139,17 +137,12 @@ export default function SongEditModal({
     setEditing(true)
   }
 
-  function cancelEditing(): void {
-    if (detail) setForm(detailToFormValue(detail)) // 丢弃改动
-    if (detail) setFileName(detail.file_name)
-    setEditing(false)
-    setShowReload(false)
-    setReplacementFile(null)
-    setSaveError(null)
-  }
-
   async function handleSave(): Promise<void> {
     if (!form.title.trim() || !fileName.trim()) return
+
+    /* 新增项与已有艺术家同名时，先让用户决定返回选择还是保存为新艺术家 */
+    const artistsToCheck = form.album.title.trim() ? [...form.artists, ...form.album.artists] : form.artists
+    if (!(await artistGuard.check(artistsToCheck))) return
 
     // 专辑黄灯（同名未选定）/绿灯脏改动需要用户先在弹框中确认，确认结果会回填到 form.album
     const guardResult = await albumGuard.check(form.album)
@@ -157,35 +150,14 @@ export default function SongEditModal({
       setForm((prev) => ({ ...prev, album: guardResult.album }))
       return
     }
-    const album = guardResult.album
-
     setSaving(true)
     setSaveError(null)
     try {
       const result = await window.api.songs.update(songId, {
-        title: form.title.trim(),
+        ...songFormMetadata(form, guardResult.album),
         fileName: fileName.trim(),
         replacementFilePath: replacementFile?.filePath ?? null,
-        firstHeardDate: form.firstHeardDate.trim() || null,
-        lyric: form.lyric.trim() || null,
-        lyricFilePath: form.lyricFilePath,
-        artists: form.artists,
-        tagIds: form.tags.map((t) => t.id),
-        album: album.title.trim()
-          ? {
-              title: album.title.trim(),
-              releaseDate: album.releaseDate.trim() || null,
-              albumType: album.albumType || null,
-              totalDiscs: album.totalDiscs.trim() ? Number(album.totalDiscs) : null,
-              labels: album.labels,
-              discNumber: album.discNumber.trim() ? Number(album.discNumber) : null,
-              trackNumber: album.trackNumber.trim() ? Number(album.trackNumber) : null,
-              artists: album.artists,
-              albumId: album.selectedAlbumId
-            }
-          : null,
-        score: form.score.trim() ? Number(form.score) : null,
-        comment: form.comment.trim() || null
+        tagIds: form.tags.map((t) => t.id)
       })
       usePlayerStore.getState().updateSongFile(songId, result.fileName, result.audioReplaced)
       useLibraryStore.getState().invalidateSongs()
@@ -232,12 +204,24 @@ export default function SongEditModal({
                 <Pencil size={16} />
               </button>
             )}
-            <button onClick={() => setConfirmingDeletion(true)} className="library-icon-button text-neutral-500 hover:text-red-300" title="删除歌曲" aria-label="删除歌曲">
+            <button onClick={() => setConfirmingDeletion(true)} disabled={saving || deleting} className="library-icon-button text-neutral-500 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-30" title="删除歌曲" aria-label="删除歌曲">
               <Trash2 size={16} />
             </button>
-            <button onClick={onClose} className="library-icon-button" title="关闭" aria-label="关闭">
+            <button onClick={onClose} disabled={saving || deleting} className="library-icon-button modal-close-button disabled:cursor-not-allowed disabled:opacity-30" title="关闭" aria-label="关闭">
               <X size={18} />
             </button>
+            {editing && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || deleting || confirmingDeletion || !form.title.trim() || !fileName.trim()}
+                className="library-icon-button modal-confirm-button disabled:cursor-not-allowed disabled:opacity-30"
+                title={saving ? '保存中...' : '保存'}
+                aria-label={saving ? '保存中...' : '保存'}
+              >
+                <Check size={19} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -269,19 +253,6 @@ export default function SongEditModal({
             </div>
 
             {saveError && <p className="rounded-lg bg-red-400/[0.08] px-3 py-2 text-xs text-red-200">{saveError}</p>}
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={cancelEditing} className="text-sm px-3 py-1.5 rounded hover:bg-white/10 text-neutral-400">
-                取消
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !form.title.trim() || !fileName.trim()}
-                className="text-sm px-3 py-1.5 rounded bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                保存
-              </button>
-            </div>
           </>
         ) : (
           <>
@@ -303,7 +274,7 @@ export default function SongEditModal({
               />
               <InfoRow label="文件名" value={detail.file_name} />
               <div className="grid grid-cols-4 gap-x-6">
-                <InfoRow label="时长" value={formatDuration(detail.length)} />
+                <InfoRow label="时长" value={formatTime(detail.length)} />
                 <InfoRow label="评分" value={detail.score != null ? String(detail.score) : '--'} />
                 <InfoRow label="歌词" value={detail.lyric ? '有' : '无'} />
                 <div aria-hidden="true" />
@@ -383,6 +354,7 @@ export default function SongEditModal({
         </div>
       </div>
       {albumGuard.dialog}
+      {artistGuard.dialog}
     </div>
   )
 }

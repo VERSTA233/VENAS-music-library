@@ -1,10 +1,11 @@
 import { GitMerge, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { ArtistAliasOf, ArtistAliasType, ArtistRow } from '../../../shared/types'
+import type { ArtistAliasOf, ArtistAliasPlan, ArtistAliasType, ArtistRow } from '../../../shared/types'
 import Cover from './Cover'
 import ArtistMemberPicker from './ArtistMemberPicker'
 import { usePlayerStore } from '../stores/playerStore'
 import { useLibraryStore } from '../stores/libraryStore'
+import { useNavStore } from '../stores/navStore'
 
 interface ArtistEditModalProps {
   artist: ArtistRow
@@ -16,7 +17,7 @@ interface ArtistEditModalProps {
   onClose: () => void
   onSaved: () => void
   onDeleted?: () => void
-  onPictureChanged?: () => void
+  onNavigateMember?: (member: ArtistRow) => void
 }
 
 const TYPE_OPTIONS: { value: 'Person' | 'Group'; label: string }[] = [
@@ -37,7 +38,7 @@ export default function ArtistEditModal({
   onClose,
   onSaved,
   onDeleted,
-  onPictureChanged
+  onNavigateMember
 }: ArtistEditModalProps): React.JSX.Element {
   const [name, setName] = useState(artist.name)
   const [type, setType] = useState<'Person' | 'Group' | ''>(
@@ -45,7 +46,6 @@ export default function ArtistEditModal({
   )
   const [country, setCountry] = useState(artist.country ?? '')
   const [selectedMembers, setSelectedMembers] = useState<ArtistRow[]>(members)
-  const [pictureVersion, setPictureVersion] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [managementMode, setManagementMode] = useState<ManagementMode>(null)
@@ -53,8 +53,9 @@ export default function ArtistEditModal({
   const [merging, setMerging] = useState(false)
   const [mergeQuery, setMergeQuery] = useState('')
   const [mergeCandidates, setMergeCandidates] = useState<ArtistRow[]>([])
-  const [mergeTarget, setMergeTarget] = useState<ArtistRow | null>(null)
+  const [mergeTarget, setMergeTarget] = useState<Pick<ArtistRow, 'id' | 'name'> | null>(null)
   const [aliasType, setAliasType] = useState<ArtistAliasType>('alias')
+  const [aliasPlan, setAliasPlan] = useState<ArtistAliasPlan | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const searchRequestRef = useRef(0)
@@ -69,6 +70,10 @@ export default function ArtistEditModal({
     void window.api.artists.search(mergeQuery).then((results) => {
       if (requestId !== searchRequestRef.current) return
       setMergeCandidates(results.filter((candidate) => candidate.id !== artist.id && candidate.type !== 'Label'))
+    }).catch((reason) => {
+      if (requestId !== searchRequestRef.current) return
+      setMergeCandidates([])
+      setError(reason instanceof Error ? reason.message : String(reason))
     })
   }, [artist.id, managementMode, mergeQuery])
 
@@ -80,8 +85,6 @@ export default function ArtistEditModal({
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       await window.api.artists.setManualPicture(artist.id, bytes)
-      setPictureVersion((value) => value + 1)
-      onPictureChanged?.()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -140,12 +143,19 @@ export default function ArtistEditModal({
     }
   }
 
-  async function handleSetAlias(): Promise<void> {
-    if (!mergeTarget) return
+  async function handleSetAlias(confirmed = false): Promise<void> {
+    if (!mergeTarget && (!aliasOf || mergeQuery.trim())) return
     setMerging(true)
     setError(null)
     try {
-      await window.api.artists.setAlias(artist.id, mergeTarget.id, aliasType)
+      if (mergeTarget && !confirmed) {
+        const plan = await window.api.artists.previewAlias(artist.id, mergeTarget.id, aliasType)
+        if (plan.needsConfirmation) {
+          setAliasPlan(plan)
+          return
+        }
+      }
+      await window.api.artists.setAlias(artist.id, mergeTarget?.id ?? null, aliasType)
       useLibraryStore.getState().invalidateSongs()
       onSaved()
       onClose()
@@ -158,9 +168,11 @@ export default function ArtistEditModal({
 
   function chooseManagementMode(mode: ManagementMode): void {
     setError(null)
+    setAliasPlan(null)
     setManagementMode(mode)
-    setMergeQuery('')
-    setMergeTarget(null)
+    setMergeQuery(mode === 'alias' ? aliasOf?.name ?? '' : '')
+    setMergeTarget(mode === 'alias' ? aliasOf : null)
+    if (mode === 'alias') setAliasType(aliasOf?.aliasType ?? 'alias')
   }
 
   const busy = saving || uploading || deleting || merging
@@ -183,7 +195,7 @@ export default function ArtistEditModal({
         <div className="modal-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="flex items-center gap-3">
             <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-white/[0.05]">
-              <Cover cacheKey={`${artist.id}-${pictureVersion}`} load={() => window.api.artists.picture(artist.id)} className="h-full w-full object-cover" />
+              <Cover cacheKey={artist.id} resource={{ kind: 'artist', id: artist.id }} load={() => window.api.artists.picture(artist.id)} className="h-full w-full object-cover" />
             </div>
             <label className="cursor-pointer text-sm text-neutral-400 transition hover:text-white">
               {uploading ? '正在上传头像...' : '更换头像'}
@@ -217,6 +229,13 @@ export default function ArtistEditModal({
                   members={selectedMembers}
                   onChange={setSelectedMembers}
                   disabled={busy}
+                  onNavigate={(member) => {
+                    if (onNavigateMember) onNavigateMember(member)
+                    else {
+                      onClose()
+                      useNavStore.getState().navigate({ view: 'artist', id: member.id, isLabel: member.type === 'Label' })
+                    }
+                  }}
                 />
               </div>
             )}
@@ -227,7 +246,7 @@ export default function ArtistEditModal({
               {allowManagement && managementMode === null && (
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={() => chooseManagementMode('merge')} disabled={busy} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30"><GitMerge size={16} />合并艺术家</button>
-                  {!aliasOf && <button type="button" onClick={() => chooseManagementMode('alias')} disabled={busy} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30"><GitMerge size={16} />设为别名</button>}
+                  <button type="button" onClick={() => chooseManagementMode('alias')} disabled={busy} aria-label={aliasOf ? '编辑别名' : '设为别名'} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30"><GitMerge size={16} />{aliasOf ? '编辑' : '设为别名'}</button>
                 </div>
               )}
               {managementMode === 'delete' && (
@@ -242,11 +261,11 @@ export default function ArtistEditModal({
               {(managementMode === 'merge' || managementMode === 'alias') && (
                 <div>
                   <label htmlFor="merge-artist" className="text-xs text-neutral-500">{managementMode === 'alias' ? '主艺名' : '合并到'}</label>
-                  <input id="merge-artist" autoFocus value={mergeQuery} onChange={(event) => { setMergeQuery(event.target.value); setMergeTarget(null) }} placeholder="搜索目标艺术家" className="mt-1.5 w-full rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08]" />
-                  {mergeCandidates.length > 0 && (
+                  <input id="merge-artist" autoFocus value={mergeQuery} disabled={busy || aliasPlan !== null} onChange={(event) => { setMergeQuery(event.target.value); setMergeTarget(null) }} placeholder="搜索目标艺术家" className="mt-1.5 w-full rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08]" />
+                  {!mergeTarget && mergeCandidates.length > 0 && (
                     <div className="mt-2 max-h-40 overflow-y-auto border-y border-white/[0.08] py-1">
                       {mergeCandidates.map((candidate) => (
-                        <button key={candidate.id} type="button" onClick={() => setMergeTarget(candidate)} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${mergeTarget?.id === candidate.id ? 'bg-white/[0.13] text-white' : 'text-neutral-300 hover:bg-white/[0.08]'}`}>
+                        <button key={candidate.id} type="button" onClick={() => { setMergeTarget(candidate); setMergeQuery(candidate.name) }} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-neutral-300 transition hover:bg-white/[0.08]">
                           <span className="truncate">{candidate.name}</span>
                           <span className="ml-3 shrink-0 text-xs text-neutral-500">{candidate.type ?? '未设置'}</span>
                         </button>
@@ -256,17 +275,38 @@ export default function ArtistEditModal({
                   {managementMode === 'alias' && (
                     <div className="mt-3 flex items-center gap-3">
                       <label htmlFor="alias-type" className="text-xs text-neutral-500">别名类型</label>
-                      <select id="alias-type" value={aliasType} onChange={(event) => setAliasType(event.target.value as ArtistAliasType)} className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-white/[0.25]">
-                        <option value="alias" className="bg-neutral-900">alias</option>
-                        <option value="former name" className="bg-neutral-900">former name</option>
+                      <select id="alias-type" value={aliasType} disabled={busy || aliasPlan !== null} onChange={(event) => setAliasType(event.target.value as ArtistAliasType)} className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-2 py-1.5 text-xs text-neutral-100 outline-none focus:border-white/[0.25]">
+                        <option value="alias" className="bg-neutral-900">Alias</option>
+                        <option value="former name" className="bg-neutral-900">Former name</option>
                       </select>
                     </div>
                   )}
-                  <p className="mt-3 text-xs leading-5 text-neutral-500">{managementMode === 'alias' ? '当前艺术家、歌曲关联和头像都会保留；主页副标题将显示其主艺名。' : '会将歌曲、专辑艺术家和厂牌关联转移到目标艺术家，然后删除当前艺术家与其头像。'}</p>
-                  <div className="mt-4 flex justify-end gap-2">
+                  <p className="mt-3 text-xs leading-5 text-neutral-500">{managementMode === 'alias' ? `当前艺术家、歌曲关联和头像都会保留。选择已有别名时会关联到其最终主艺名；当前艺术家旗下的别名也会一并归入，各自类型保持不变。${aliasOf ? '清空主艺名后保存，仅解除当前艺术家的别名关系。' : ''}` : '会将歌曲、专辑艺术家和厂牌关联转移到目标艺术家，然后删除当前艺术家与其头像。'}</p>
+                  {aliasPlan ? (
+                    <div className="mt-4 rounded-xl bg-white/[0.05] p-4" role="region" aria-labelledby="alias-plan-title">
+                      <h3 id="alias-plan-title" className="text-sm font-medium text-white">确认别名归并</h3>
+                      {aliasPlan.selectedArtist.id !== aliasPlan.canonicalArtist.id && (
+                        <p className="mt-2 break-words text-xs leading-5 text-neutral-400">{aliasPlan.selectedArtist.name} 已是 {aliasPlan.canonicalArtist.name} 的别名，将直接关联最终主艺名。</p>
+                      )}
+                      <p className="mt-2 break-words text-xs leading-5 text-neutral-400">保存后，以下名义将统一归入 {aliasPlan.canonicalArtist.name}：</p>
+                      <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto text-sm">
+                        {aliasPlan.aliases.map((entry) => (
+                          <li key={entry.id} className="flex items-start justify-between gap-4">
+                            <span className="min-w-0 break-words text-neutral-200">{entry.name}</span>
+                            <span className="shrink-0 text-xs text-neutral-400">{entry.aliasType ?? '未设置类型'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-3 text-xs leading-5 text-neutral-500">已有别名各自的类型保持不变，歌曲署名和头像保留。</p>
+                      <div className="mt-4 flex justify-end gap-2">
+                        <button type="button" onClick={() => setAliasPlan(null)} disabled={busy} className="rounded-lg px-3 py-2 text-sm text-neutral-400 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30">返回修改</button>
+                        <button type="button" onClick={() => void handleSetAlias(true)} disabled={busy} className="rounded-lg bg-white px-3 py-2 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:opacity-30">{merging ? '正在保存...' : '确认归并'}</button>
+                      </div>
+                    </div>
+                  ) : <div className="mt-4 flex justify-end gap-2">
                     <button type="button" onClick={() => chooseManagementMode(null)} disabled={merging} className="rounded-lg px-3 py-2 text-sm text-neutral-400 transition hover:bg-white/[0.08] hover:text-white disabled:opacity-30">取消</button>
-                    <button type="button" onClick={managementMode === 'alias' ? handleSetAlias : handleMerge} disabled={!mergeTarget || merging} className="rounded-lg bg-white px-3 py-2 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:opacity-30">{merging ? (managementMode === 'alias' ? '正在关联...' : '正在合并...') : (managementMode === 'alias' ? '确认关联' : '确认合并')}</button>
-                  </div>
+                    <button type="button" onClick={managementMode === 'alias' ? () => void handleSetAlias() : handleMerge} disabled={merging || (!mergeTarget && !(managementMode === 'alias' && aliasOf && !mergeQuery.trim()))} className="rounded-lg bg-white px-3 py-2 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:opacity-30">{merging ? (managementMode === 'alias' ? '正在保存...' : '正在合并...') : (managementMode === 'alias' ? aliasOf ? '保存' : '确认关联' : '确认合并')}</button>
+                  </div>}
                 </div>
               )}
             </div>

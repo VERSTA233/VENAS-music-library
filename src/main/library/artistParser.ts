@@ -9,9 +9,7 @@
 
 import type { ParsedArtist } from '../../shared/types'
 
-export type { ParsedArtist }
-
-export interface ParseResult {
+interface ParseResult {
   /* 剔除 feat. 片段后的清洗文本（用于 title 来源时得到干净曲名） */
   cleanedText: string
   artists: ParsedArtist[]

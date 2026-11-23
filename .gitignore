@@ -2,6 +2,9 @@ node_modules/
 out/
 dist/
 release/
+resources/audio-tags/
+resources/audio-inspect/
+resources/native-media/
 *.tsbuildinfo
 .DS_Store
 

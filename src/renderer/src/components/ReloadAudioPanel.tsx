@@ -36,7 +36,6 @@ export default function ReloadAudioPanel({
       } else if (file) {
         await window.api.songs.setManualCover(songId, new Uint8Array(await file.arrayBuffer()))
       }
-      window.dispatchEvent(new Event('library:cover-updated'))
       setCoverMessage(action === 'embedded' ? '已从内嵌封面更新' : '封面已上传')
     } catch (error) {
       setCoverError(error instanceof Error ? error.message : '封面更新失败，请重试')

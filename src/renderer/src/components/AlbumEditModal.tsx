@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { ImagePlus, X } from 'lucide-react'
 import type { AlbumRow, AlbumUpdateData } from '../../../shared/types'
 import ArtistPicker, { type ArtistFormEntry } from './ArtistPicker'
+import { useArtistSubmitGuard } from './ArtistSubmitGuard'
 import LabelPicker from './LabelPicker'
 import Cover from './Cover'
 import YMDDateInput from './YMDDateInput'
@@ -15,23 +16,22 @@ interface AlbumEditModalProps {
   artists: { id: number; name: string; order: number }[]
   onClose: () => void
   onSaved: () => void
-  onCoverChanged?: () => void
 }
 
 /* 专辑资料编辑：专辑封面是专辑级缓存，选取新图片后立即覆盖并刷新当前详情页。 */
-export default function AlbumEditModal({ album, artists, onClose, onSaved, onCoverChanged }: AlbumEditModalProps): React.JSX.Element {
+export default function AlbumEditModal({ album, artists, onClose, onSaved }: AlbumEditModalProps): React.JSX.Element {
   const [title, setTitle] = useState(album.title)
   const [releaseDate, setReleaseDate] = useState(album.release_date ?? '')
   const [albumType, setAlbumType] = useState(album.album_type ?? 'Album')
   const [totalDiscs, setTotalDiscs] = useState(album.total_discs != null ? String(album.total_discs) : '')
   const [labels, setLabels] = useState(album.labels.map((label) => label.name))
   const [albumArtists, setAlbumArtists] = useState<ArtistFormEntry[]>(
-    artists.map((artist) => ({ name: artist.name, role: 'Primary', order: artist.order, type: null }))
+    artists.map((artist) => ({ artistId: artist.id, name: artist.name, role: 'Primary', order: artist.order, type: null }))
   )
-  const [pictureVersion, setPictureVersion] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const artistGuard = useArtistSubmitGuard()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const hasTrack = usePlayerStore((state) => state.currentIndex !== null)
   const typeOptions = albumTypeOptions(albumType)
@@ -44,8 +44,6 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       await window.api.albums.setManualCover(album.id, bytes)
-      setPictureVersion((version) => version + 1)
-      onCoverChanged?.()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -60,6 +58,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
       setError('专辑名不能为空')
       return
     }
+    if (!(await artistGuard.check(albumArtists))) return
     setSaving(true)
     setError(null)
     const data: AlbumUpdateData = {
@@ -70,7 +69,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
       labels,
       artists: albumArtists
         .filter((artist) => artist.name.trim())
-        .map((artist, order) => ({ name: artist.name.trim(), order, type: artist.type }))
+        .map((artist, order) => ({ ...artist, name: artist.name.trim(), order }))
     }
     try {
       await window.api.albums.update(album.id, data)
@@ -96,7 +95,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
         <div className="modal-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="flex items-center gap-4">
             <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-white/[0.05] ring-1 ring-white/[0.08]">
-              <Cover cacheKey={`${album.id}-${pictureVersion}`} load={() => window.api.albums.cover(album.id)} className="h-full w-full object-cover" />
+              <Cover cacheKey={album.id} resource={{ kind: 'album', id: album.id }} load={() => window.api.albums.cover(album.id)} className="h-full w-full object-cover" />
             </div>
             <label className={`flex cursor-pointer items-center gap-2 text-sm text-neutral-400 transition hover:text-white ${busy ? 'pointer-events-none opacity-40' : ''}`}>
               <ImagePlus size={17} />
@@ -124,13 +123,13 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
               </label>
               <label className="flex flex-col gap-1.5 text-xs text-neutral-500">
                 总碟数
-                <input value={totalDiscs} onChange={(event) => setTotalDiscs(event.target.value.replace(/[^0-9]/g, ''))} disabled={busy} inputMode="numeric" className="h-8 w-full rounded-lg border border-white/[0.1] bg-white/[0.05] px-2 text-center text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40" />
+                <input value={totalDiscs} onChange={(event) => setTotalDiscs(event.target.value.replace(/[^0-9]/g, ''))} disabled={busy} inputMode="numeric" className="h-8 w-full rounded-lg border border-white/[0.1] bg-white/[0.05] px-2 text-left text-sm text-neutral-100 outline-none transition focus:border-white/[0.25] focus:bg-white/[0.08] disabled:opacity-40" />
               </label>
             </div>
 
             <div className="flex flex-col gap-1.5 text-xs text-neutral-500">
               <span>厂牌</span>
-              <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-2 transition focus-within:border-white/[0.25] focus-within:bg-white/[0.08]">
+              <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 transition focus-within:border-white/[0.25] focus-within:bg-white/[0.08]">
                 <LabelPicker values={labels} onChange={setLabels} disabled={busy} />
               </div>
             </div>
@@ -148,6 +147,7 @@ export default function AlbumEditModal({ album, artists, onClose, onSaved, onCov
           </div>
         </div>
       </div>
+      {artistGuard.dialog}
     </div>
   )
 }

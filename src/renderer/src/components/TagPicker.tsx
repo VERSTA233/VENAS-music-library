@@ -5,10 +5,11 @@ import { TAG_TYPE_OPTIONS } from '../tagTypes'
 interface TagPickerProps {
   tags: TagRow[]
   onChange: (tags: TagRow[]) => void
+  onOpenTag?: (tag: TagRow) => void
 }
 
 /* 歌曲的多 Tag 编辑器：搜索已有 Tag 添加，或输入新名称 + 选类型创建 */
-export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX.Element {
+export default function TagPicker({ tags, onChange, onOpenTag }: TagPickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<TagRow[]>([])
   const [newTagType, setNewTagType] = useState<string>(TAG_TYPE_OPTIONS[0])
@@ -105,8 +106,12 @@ export default function TagPicker({ tags, onChange }: TagPickerProps): React.JSX
       <div className="flex flex-wrap gap-2">
         {tags.map((t) => (
           <span key={t.id} className="flex items-center gap-1 bg-white/10 rounded px-2 py-0.5 text-xs">
-            {t.name}
-            <button onClick={() => removeTag(t.id)} className="text-neutral-400 hover:text-red-400">
+            {onOpenTag ? (
+              <button type="button" onClick={() => onOpenTag(t)} aria-label={`查看标签 ${t.name}`} className="-my-0.5 py-1 text-neutral-300 hover:text-white transition-colors duration-200">
+                {t.name}
+              </button>
+            ) : t.name}
+            <button type="button" onClick={() => removeTag(t.id)} aria-label={`移除标签 ${t.name}`} className="text-neutral-400 hover:text-red-400">
               ✕
             </button>
           </span>

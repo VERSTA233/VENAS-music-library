@@ -38,6 +38,14 @@ export const colors = {
   'progress-track': 'rgba(255, 255, 255, 0.22)',
   'progress-fill': 'rgba(255, 255, 255, 0.92)',
   'progress-shadow': 'rgba(0, 0, 0, 0.35)',
+  /* 无歌词播放可视化：低对比网格、灰白频谱与少量红色定位。 */
+  'visualizer-bar': 'rgba(230, 230, 235, 0.53)',
+  'visualizer-peak': 'rgba(244, 244, 245, 0.78)',
+  'visualizer-grid': 'rgba(255, 255, 255, 0.065)',
+  'visualizer-label': '#85858f',
+  'visualizer-accent': '#fa4b53',
+  'visualizer-waveform': 'rgba(230, 230, 235, 0.25)',
+  'visualizer-waveform-played': 'rgba(230, 230, 235, 0.65)',
   // 状态色：同时供文字、边框及带透明度的背景使用。
   'red-100': 'oklch(93.6% 0.032 17.717)',
   'red-200': 'oklch(88.5% 0.062 18.334)',

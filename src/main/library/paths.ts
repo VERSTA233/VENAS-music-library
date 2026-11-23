@@ -16,15 +16,10 @@ export function libraryPaths(musicRoot: string, systemRoot: string) {
     backups: join(database, 'backups'),
     tools: join(system, 'tools'),
     ncmdump: join(system, 'tools', 'ncmdump'),
-    cache: join(system, 'cache'),
-    cacheAudio: join(system, 'cache', 'audio'),
-    cacheWaveforms: join(system, 'cache', 'waveforms'),
     assets,
     assetsArtistPictures: join(assets, 'artist_pictures'),
     assetsSongPictures: join(assets, 'song_pictures'),
-    assetsAlbumPictures: join(assets, 'album_pictures'),
-    assetsUi: join(assets, 'ui'),
-    logs: join(system, 'logs')
+    assetsAlbumPictures: join(assets, 'album_pictures')
   }
 }
 

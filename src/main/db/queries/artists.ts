@@ -1,8 +1,6 @@
 import type Database from 'better-sqlite3'
-import type { ArtistAliasOf, ArtistAliasType, ArtistRow, ArtistListItem, SongListItem } from '../../../shared/types'
+import type { ArtistAliasOf, ArtistAliasPlan, ArtistAliasType, ArtistRow, ArtistListItem, SongListItem } from '../../../shared/types'
 import { withArtistNames } from './songList'
-
-export type { ArtistRow }
 
 function parseMemberIds(value: string | null): number[] {
   if (!value) return []
@@ -273,39 +271,73 @@ export function mergeArtistRecords(db: Database.Database, sourceArtistId: number
   })()
 }
 
-/* B 作为 A 的别名仍保留在 artists 中，歌曲继续直接关联 B。 */
-export function setArtistAlias(
+/* 预览和写入共用同一归并规则；预览不修改数据库。 */
+export function previewArtistAlias(
   db: Database.Database,
   aliasArtistId: number,
   canonicalArtistId: number,
   aliasType: ArtistAliasType
-): void {
-  if (aliasArtistId === canonicalArtistId) throw new Error('不能将艺术家设为自身的别名')
+): ArtistAliasPlan {
   const alias = getArtistById(db, aliasArtistId)
-  const canonical = getArtistById(db, canonicalArtistId)
-  if (!alias || !canonical) throw new Error('艺术家不存在')
-  if (alias.type === 'Label' || canonical.type === 'Label') throw new Error('厂牌不能参与艺术家别名关联')
-
-  const aliasHasChildren = db
-    .prepare<[number], { present: number }>('SELECT 1 AS present FROM artist_aliases WHERE canonical_artist_id = ? LIMIT 1')
-    .get(aliasArtistId)
-  if (aliasHasChildren) throw new Error('已有其他别名归属于当前艺术家，不能再将它设为别名')
-
-  const canonicalIsAlias = db
-    .prepare<[number], { present: number }>('SELECT 1 AS present FROM artist_aliases WHERE alias_artist_id = ? LIMIT 1')
-    .get(canonicalArtistId)
-  if (canonicalIsAlias) throw new Error('目标艺术家本身是别名，不能作为主艺名')
-
-  try {
-    db.prepare(
-      'INSERT INTO artist_aliases (canonical_artist_id, alias_artist_id, alias_type) VALUES (?, ?, ?)'
-    ).run(canonicalArtistId, aliasArtistId, aliasType)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
-      throw new Error('当前艺术家已经关联到一个主艺名')
-    }
-    throw error
+  const selected = getArtistById(db, canonicalArtistId)
+  if (!alias || !selected) throw new Error('艺术家不存在')
+  if (alias.type === 'Label') throw new Error('厂牌不能参与艺术家别名关联')
+  const parentQuery = db.prepare<[number], { canonical_artist_id: number }>(
+    'SELECT canonical_artist_id FROM artist_aliases WHERE alias_artist_id = ?'
+  )
+  const visited = new Set([aliasArtistId])
+  let canonical = selected
+  while (true) {
+    if (visited.has(canonical.id)) throw new Error('别名关系不能指向自身或形成循环')
+    visited.add(canonical.id)
+    if (canonical.type === 'Label') throw new Error('厂牌不能参与艺术家别名关联')
+    const parent = parentQuery.get(canonical.id)
+    if (!parent) break
+    const next = getArtistById(db, parent.canonical_artist_id)
+    if (!next) throw new Error('艺术家不存在')
+    canonical = next
   }
+  const descendants = db.prepare<[number], ArtistAliasOf>(
+    `WITH RECURSIVE descendants(id) AS (
+       SELECT alias_artist_id FROM artist_aliases WHERE canonical_artist_id = ?
+       UNION
+       SELECT aa.alias_artist_id FROM artist_aliases aa JOIN descendants d ON aa.canonical_artist_id = d.id
+     )
+     SELECT ar.id, ar.name, aa.alias_type AS aliasType
+     FROM descendants d JOIN artists ar ON ar.id = d.id
+     JOIN artist_aliases aa ON aa.alias_artist_id = ar.id
+     ORDER BY ar.id`
+  ).all(aliasArtistId)
+  return {
+    selectedArtist: { id: selected.id, name: selected.name },
+    canonicalArtist: { id: canonical.id, name: canonical.name },
+    aliases: [{ id: alias.id, name: alias.name, aliasType }, ...descendants],
+    needsConfirmation: selected.id !== canonical.id || descendants.length > 0
+  }
+}
+
+/* 艺术家与歌曲署名保持独立；关系统一指向最终主艺名，已有别名保留各自的类型。 */
+export function setArtistAlias(
+  db: Database.Database,
+  aliasArtistId: number,
+  canonicalArtistId: number | null,
+  aliasType: ArtistAliasType
+): void {
+  if (canonicalArtistId === null) {
+    db.prepare('DELETE FROM artist_aliases WHERE alias_artist_id = ?').run(aliasArtistId)
+    return
+  }
+  db.transaction(() => {
+    const plan = previewArtistAlias(db, aliasArtistId, canonicalArtistId, aliasType)
+    const rootId = plan.canonicalArtist.id
+    const moveAlias = db.prepare('UPDATE artist_aliases SET canonical_artist_id = ? WHERE alias_artist_id = ?')
+    for (const descendant of plan.aliases.slice(1)) moveAlias.run(rootId, descendant.id)
+    db.prepare(
+      `INSERT INTO artist_aliases (canonical_artist_id, alias_artist_id, alias_type) VALUES (?, ?, ?)
+       ON CONFLICT(alias_artist_id) DO UPDATE SET
+         canonical_artist_id = excluded.canonical_artist_id, alias_type = excluded.alias_type`
+    ).run(rootId, aliasArtistId, aliasType)
+  })()
 }
 
 export function getArtistAliasOf(db: Database.Database, artistId: number): ArtistAliasOf | null {

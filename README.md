@@ -1,27 +1,97 @@
 # VENAS 本地音乐库播放器
 
-个人本地音乐库管理与播放软件，Electron + TypeScript + React + better-sqlite3。
+本系统为本地音乐库管理与播放软件，主要优化了音乐库的整理，搭配了简易的歌词显示和可视化。
 
 ---
 
-## 从 GitHub 克隆后运行
+## 功能简介
 
-本节面向一台从未安装开发环境的新 macOS 或 Windows 电脑。项目含有 `better-sqlite3` 和 `sharp` 两个原生依赖，必须在目标系统、目标 CPU 架构上重新安装；不要复制另一台电脑的 `node_modules`。
+- 对曲目添加艺术家、专辑、歌词、Tags、评分、评论等信息。
 
-### 运行结果与范围
+- 一首曲目可以添加多个 Tags，方便按照 Genre、Mood 等特征进行整理。
 
-完成下文步骤后，执行 `npm run dev` 即可启动可用的 VENAS 桌面程序。首次启动会要求选择：
+- 对于有歌词的音频，可以在全屏播放界面显示歌词，并跳转到指定歌词的位置。对于无歌词的音频，系统实时读取音频信息，显示音频频谱。
 
-- **音乐目录**：其下应有或将自动创建 `Append/` 和 `Music/`。
-- **系统目录**：其下会创建 `.system/`，存放数据库、封面和配置；其中数据库位于 `.system/database/`。建议选择一个稳定且有写入权限的位置。
+- 系统主要根据 Artist、Album、Tags 进行分类。Artist 和 Album 可在对应主页编辑信息。
 
-若只需要在另一台电脑上运行软件，按本节的源码运行步骤即可。若需要生成无需 Node.js 环境即可安装的应用，请继续阅读下方“打包为可安装应用”。
+- 软件可以接入网易云音乐 NCM 文件破解文件，在下载歌曲后一键解码。
 
-### macOS：从零运行
+---
 
-适用于 Apple Silicon 和 Intel Mac；请在目标 Mac 本机执行，`npm ci` 会下载对应架构的 Electron 与原生模块。
+## 音乐库目录结构
 
-1. 安装 Xcode Command Line Tools。在“终端”执行，并在系统弹窗中完成安装：
+首次打开软件时选择一个音乐库根目录，系统会将它同时用作音乐目录和系统目录。之后可在 **Settings → 存储位置** 中分别调整。
+
+“音乐目录”指 `Append/`、`Music/` 的父目录，“系统目录”指 `.system/` 的父目录。
+
+### 音乐目录
+
+```text
+<音乐目录>/
+├── Append/                          # 待入库音频
+│   ├── 艺术家 - 歌名.flac
+│   ├── 艺术家 - 歌名.mp3
+│   └── 艺术家 - 歌名.lrc             # 可自动匹配同名音频的歌词
+└── Music/                           # 音乐库音频
+    ├── 艺术家 - 歌名.flac
+    ├── 艺术家 - 歌名.mp3
+    └── Playlist/                    # 手动生成后出现
+        ├── Genre/                   # Tag 类型
+        │   └── Ambient.m3u          # 对应 Tag 的歌单
+        ├── Mood/
+        │   └── Sorrow.m3u
+        └── 未分类/
+            └── 某个未分类标签.m3u
+```
+
+文件需要先放入 Append 文件夹中，在系统中填写信息后由软件移动并建立数据库记录。
+
+### 系统目录
+
+```text
+<系统目录>/
+└── .system/                         # 隐藏目录，保存音乐库数据
+    ├── database/
+    │   ├── music.db                 # 歌曲、艺术家、专辑、Tag、关联与任务状态
+    │   ├── music.db-wal             # SQLite 运行时生成的预写日志
+    │   ├── music.db-shm             # SQLite 运行时生成的共享内存文件
+    │   └── backups/
+    │       └── music_bak_YYYYMMDD.db # 启动时按日期备份，最多保留最近 3 份
+    ├── assets/
+    │   ├── artist_pictures/
+    │   │   └── <艺术家ID>.jpg         # 艺术家 / 厂牌上传的头像
+    │   ├── album_pictures/
+    │   │   └── <专辑ID>.jpg           # 专辑封面缓存，同专辑曲目共享
+    │   └── song_pictures/
+    │       └── <歌曲ID>.jpg           # 无专辑歌曲的独立封面缓存
+    └── tools/                        # 用户另行放入的工具
+        └── ncmdump                  # 如 NCM 解码工具
+```
+
+目录和数据库会自动创建。例如，音乐目录和系统目录都选择 `/Users/你的用户名/Music/VENAS` 时，实际数据库路径为：
+
+```text
+/Users/你的用户名/Music/VENAS/.system/database/music.db
+```
+
+### 应用设置与任务临时目录
+
+目录选择、音量、播放队列、播放进度及导航会话保存在 Electron 用户数据目录的 `config.json`。默认路径为：
+
+```text
+macOS:   ~/Library/Application Support/<应用名>/config.json
+Windows: %APPDATA%\<应用名>\config.json
+```
+
+---
+
+## 项目构建
+
+### macOS
+
+适用于 Apple Silicon 和 Intel Mac
+
+1. 安装 Xcode Command Line Tools。
    
    ```bash
    xcode-select --install
@@ -39,11 +109,9 @@
 3. 克隆仓库并进入目录：
    
    ```bash
-   git clone https://github.com/VERSTA233/VENAS-music-library
+   git clone https://github.com/VERSTA233/VENAS-music-library MusicLib
    cd MusicLib
    ```
-   
-   若系统提示没有 `git`，重新执行第一步并重开终端。
 
 4. 安装锁定版本的依赖。此命令会自动执行 `postinstall`，为当前 macOS 和 Electron 版本准备 `better-sqlite3`、`sharp`：
    
@@ -51,16 +119,24 @@
    npm ci
    ```
 
-5. 验证并启动：
+5. 安装Homebrew，按 [Homebrew 官网](https://brew.sh/) 完成安装。
+
+6. 安装标签写入器的构建依赖。
+   
+   ```bash
+   brew install taglib pkg-config
+   ```
+
+7. 验证并启动：
    
    ```bash
    npm run typecheck
    npm run dev
    ```
    
-   出现 VENAS 窗口即表示启动成功。终端必须保持运行；按 `Ctrl+C` 可结束程序。
+   出现 VENAS 窗口即表示启动成功。
 
-### Windows：从零运行
+### Windows
 
 建议使用 Windows 10/11 64 位系统，并在 Windows 本机执行。不要在 macOS 上生成的 `node_modules` 或 `out/` 目录复制过来。
 
@@ -75,6 +151,14 @@
    - Python 3。可从 [python.org](https://www.python.org/downloads/windows/) 安装，并勾选 **Add Python to PATH**。
    
    后两项用于原生模块没有可用预编译包时的本地编译；即便本次安装没有触发编译，也建议保留。
+   
+   标签写入器另外需要 [MSYS2](https://www.msys2.org/) 的 UCRT64 工具链。在 **MSYS2 UCRT64** 终端执行：
+   
+   ```bash
+   pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-taglib mingw-w64-ucrt-x86_64-pkgconf make tar curl
+   ```
+   
+   将 `C:\msys64\ucrt64\bin` 与 `C:\msys64\usr\bin` 加到开发终端的 PATH，然后重开 PowerShell。构建脚本使用 C++17 / TagLib 2.x，将写入器和所需 DLL 一起打包；已处理 UTF-16 文件路径与 UTF-8 标签。Windows 构建路径尚未在 Windows 实机验证。
 
 2. 打开 PowerShell，确认 Node 可用：
    
@@ -86,7 +170,7 @@
 3. 克隆仓库并进入项目目录：
    
    ```powershell
-   git clone https://github.com/VERSTA233/VENAS-music-library
+   git clone https://github.com/VERSTA233/VENAS-music-library MusicLib
    Set-Location MusicLib
    ```
 
@@ -114,9 +198,7 @@ npx electron .
 
 Windows PowerShell 使用相同命令。该方式仍依赖项目目录和 `node_modules`，不是独立安装器。
 
-## 打包为可安装应用
-
-项目已包含 `electron-builder`。打包前必须在目标操作系统、目标 CPU 架构的电脑上重新执行 `npm ci`，让 `better-sqlite3` 与 `sharp` 安装匹配该平台的原生模块。不要复用其他电脑的 `node_modules` 或 `out/`。
+### 打包为应用
 
 所有安装包会写入项目根目录下的 `dist/`。打包前建议先执行一次类型检查：
 
@@ -124,25 +206,25 @@ Windows PowerShell 使用相同命令。该方式仍依赖项目目录和 `node_
 npm run typecheck
 ```
 
-### macOS：生成 DMG
+#### macOS
 
-请在 macOS 本机打包。Apple Silicon Mac 生成 Apple Silicon 安装包：
+Apple Silicon Mac：
 
 ```bash
 npm run build
 npx electron-builder --mac dmg --arm64 --publish never
 ```
 
-Intel Mac 改用：
+Intel Mac：
 
 ```bash
 npm run build
 npx electron-builder --mac dmg --x64 --publish never
 ```
 
-完成后在 `dist/` 中取得 `.dmg` 文件；同目录的 `mac-arm64/` 或 `mac/` 是解包后的应用目录，适合在发布前直接测试。当前项目未配置 Apple Developer 证书、公证或签名，因此首次打开未签名 DMG 内的应用时，macOS 可能要求在 Finder 中按住 Control 点击应用后选择“打开”。正式分发前应配置 Developer ID 签名与 notarization。
+完成后在 `dist/` 中生成 `.dmg` 文件。
 
-### Windows：生成安装程序
+#### Windows：生成安装程序
 
 请在 Windows x64 本机的 PowerShell 中打包：
 
@@ -151,98 +233,135 @@ npm run build
 npx electron-builder --win nsis --x64 --publish never
 ```
 
-完成后在 `dist/` 中取得 `*Setup*.exe` 安装程序；`dist/win-unpacked/` 是无需安装、可直接运行的测试版本。当前项目未配置 Windows 代码签名证书，首次分发时 Windows SmartScreen 可能显示信誉警告；正式公开发布前应添加 Authenticode 签名。
-
-### 跨平台说明
-
-不要在 macOS 上直接产出 Windows 安装程序，也不要在 Windows 上直接产出 macOS DMG。虽然 `electron-builder` 提供跨平台参数，但本项目包含原生依赖，跨平台构建还会引入目标架构预编译模块、Windows 安装器工具链或 macOS 签名等额外问题。最稳定的流程是在对应系统本机构建；自动化发布时使用 GitHub Actions 的 macOS 与 Windows runner 分别执行相同命令。
-
-### 常见问题
-
-- **`better-sqlite3` 或 `sharp` 安装失败**：确认 Node 为 LTS，删除当前电脑上的 `node_modules` 后重新执行 `npm ci`，并保留仓库中的 `package-lock.json`；Windows 还需确认 C++ Build Tools 和 Python 已安装，并重开 PowerShell。
-- **Electron 下载失败**：检查网络、代理和企业防火墙设置后重试 `npm ci`。不要把另一台电脑下载的 Electron 或原生 `.node` 文件直接混用。
-- **应用打不开或音频不能播放**：先执行 `npm run typecheck`；再在目标机器上用 `npm run dev` 查看终端错误。音频解码由目标机器上 Electron 自带 Chromium 完成，需在 Windows 实机验证实际使用的 MP3、FLAC、M4A 等格式。
-- **首次启动后的数据库在哪里**：由首次选择的系统目录决定，实际位置为 `<系统目录>/.system/database/music.db`；迁移目录请在应用的“设置”页面进行，不要手动移动运行中的数据库文件。
-
-## 二、尚未完成 / 已知待办事项
-
-- **播放队列/播放列表** 目前 `playerStore.ts` 只支持"从当前列表播放一整个队列 + 上一首/下一首"，尚未见自建歌单（Playlist）功能的数据库表或 UI（`tag_type` 建议值里虽然有 `Playlist`，但那是作为 Tag 的一种类型，不等同于独立的播放列表功能）。
-- **搜索/筛选能力有限**：目前各处搜索（`songs:list`、`artists:search`、`albums:search`、`tags:search`）都是简单的 `LIKE` 模糊匹配，没有全局搜索入口、没有组合筛选（按标签/评分/年代等）。
-
-- **无 git 提交历史**：仓库 `main` 分支目前是 0 commits，全部文件都是 untracked 状态（`git status --short` 全部显示 `??`）。下一次会话可能需要先做首次提交。
+完成后在 `dist/` 中生成 `*Setup*.exe` 安装程序。
 
 ---
 
-## 三、文件速览
+## 功能详解
 
-### `src/shared/` — 跨进程共享类型
+### Append：试听与入库
 
-- **`types.ts`**：全部跨 main/preload/renderer 共享的 TypeScript 类型定义（`ArtistRow`、`AlbumRow`、`SongListItem`、`SongDetail`、`IngestAlbumInput`/`AlbumMatchCandidate` 等）。任何 IPC 参数/返回值改动通常都要先改这里。
+将待整理音频放入 `Append/`，点击刷新读取文件。扫描支持 MP3、FLAC、WAV、OGG、M4A、AAC、APE 扩展名。
 
-### `src/main/` — 主进程
+- 双击歌曲可直接试听，无需先入库。
 
-- **`index.ts`**：Electron 入口。注册 `venas-media://` 特权协议（含手动 HTTP Range/206 支持），`createWindow()`，`ensureLibraryRoot()`（首次启动选根目录 + 旧版 `libraryRoot` 迁移到 `musicRoot`/`systemRoot`），应用生命周期钩子。
-- **`settings.ts`**：`electron-store` 持久化的 `AppSettings { musicRoot, systemRoot }`。
-- **`db/index.ts`**：`openDatabase()`/获取当前实例，开启 WAL + 外键约束，执行 `SCHEMA_SQL`。
-- **`db/schema.ts`**：全部建表 SQL（唯一权威 schema 来源）。
-- **`db/queries/artists.ts`**：艺术家增删查（含厂牌复用 `type='Label'` 的 `findOrCreateLabelArtist`）。
-- **`db/queries/labels.ts`**：厂牌专属查询（列表、详情，按厂牌分组展示旗下专辑/曲目）。
-- **`db/queries/albums.ts`**：专辑增删查，`createAlbum`/`updateAlbumFields`（新，无条件覆盖）、`searchAlbums`（返回 `AlbumMatchCandidate[]`）、专辑-艺术家关联、专辑封面归属等。
-- **`db/queries/songs.ts`**：歌曲增删查（`listSongs`/`countSongs`/`getSongDetail`/`createSong`/`updateSongFields`/`deleteSong`/`isFileNameTaken` 等）。
-- **`db/queries/songInfo.ts`**：`song_info` 表读写（入库占位创建、首次听到日期、评分评论、`touchLastHeard`）。
-- **`db/queries/tags.ts`**：标签搜索/按类型列出/新建。
-- **`library/paths.ts`**：`libraryPaths()`，给定 `musicRoot`/`systemRoot` 推导出所有固定子目录绝对路径（唯一权威目录结构来源）。
-- **`library/init.ts`**：确保音乐库全部固定子目录存在（不存在则创建）。
-- **`library/scanner.ts`**：扫描 `Append` 目录，识别音频文件与同名歌词文件。
-- **`library/artistParser.ts`**：艺术家/曲名解析规则（feat. 提取、`/` 拆分、Primary/Featured 排序）。
-- **`library/ingest.ts`**：入库主逻辑，创建歌曲记录、专辑解析（`albumId` 分支：新建 or `updateAlbumFields`）、艺术家/标签关联、`song_info` 占位。
-- **`library/coverCache.ts`**：封面压缩（≤250KB，最长边≤1000px）与写入（歌曲/专辑/艺术家共用同一压缩策略），含专辑封面迁移逻辑。
-- **`library/reload.ts`**：用 `Music/` 内另一文件重载已入库歌曲的物理文件，重新提取时长/封面。
-- **`library/backup.ts`**：数据库自动备份，保留最近 3 份。
-- **`library/healthCleanup.ts`**：设置检查结果的手动清理。只处理已展示的无歌曲专辑或艺术家/厂牌，事务内重新校验，清除对应图片；失败时回滚记录并恢复暂存图片，不删除音频。
-- **`ipc/index.ts`**：全部 `ipcMain.handle` 注册处，是 main 进程功能的总入口（`append:*`、`songs:*`、`artists:*`、`albums:*`、`tags:*`、`playback:*`、`library:*` 等命名空间）。
+- 点击歌曲右侧加号进入“添加到音乐库”，可编辑曲名、文件名、艺术家、专辑、Tag、歌词、评分和评论。
 
-### `src/preload/` — 预加载脚本
+- 点击顶栏确认后，音频从 Append 移动到 Music，同时写入数据库。
 
-- **`index.ts`**：`contextBridge` 暴露 `window.api`，把 `ipcRenderer.invoke` 包装成带类型的方法，是 renderer 调用 main 进程功能的唯一入口。
-- **`window.d.ts`**：给 `window.api` 补充全局类型声明。
+- 已导入的外部 LRC 歌词内容保存在数据库，成功入库后会尝试删除所选歌词源文件；清空按钮会清除歌词内容和文件关联。
 
-### `src/renderer/src/` — 渲染进程 UI
+- 顶栏删除按钮会删除对应的 Append 音频。
 
-- **`main.tsx`**：React 应用挂载入口。
-- **`../../shared/colors.ts`**：全应用颜色库，统一管理暗色背景、文字、状态色、滚动条和播放条颜色，Electron 窗口也共用。所有输入框占位引导文字共用 `placeholder` 色值；`assets/colors.css` 将色值映射为 Tailwind 工具类，组件内避免硬编码颜色或单独覆盖占位文字颜色。
-- **`App.tsx`**：应用外壳。左侧导航（"文件空间"=Append/Music，"基础分类"=Artist/Album），根目录展示与切换，全局空格键播放/暂停快捷键。
-- **`stores/navStore.ts`**：详情页跳转状态（`NavTarget`：跳到某艺术家/厂牌/专辑），以及"从 Music 列表跳转过去、返回时恢复滚动位置"的 `ReturnContext`。
-- **`stores/playerStore.ts`**：播放队列状态（当前队列、当前下标、播放/暂停），`playQueue`/`togglePlay`/`playNext`/`playPrev`。
-- **`stores/libraryStore.ts`**：Music 视图完整歌曲列表状态，负责排序、搜索与刷新。
-- **`views/MusicView.tsx`**：Music 库完整列表视图，双击播放，"..." 打开编辑弹窗。
-- **`views/AppendView.tsx`**：Append 暂存区列表，触发入库弹窗。
-- **`views/ArtistView.tsx`**：艺术家列表 + 详情页（含厂牌分组）。
-- **`views/AlbumView.tsx`**：专辑画廊网格 + 详情页（按 disc/track 排序曲目）。
-- **`components/SongList.tsx`**：通用歌曲列表渲染组件（封面+时长格式化等），被多个视图复用。
-- **`components/SongForm.tsx`**：歌曲编辑/入库共用表单（标题/BPM/首次听到日期/歌词/艺术家/专辑/标签字段的组装）。
-- **`components/IngestModal.tsx`**：入库弹窗，包裹 `SongForm` + `useAlbumSubmitGuard` 确认流程。
-- **`components/SongEditModal.tsx`**：已入库歌曲编辑弹窗，同样包裹 `SongForm` + `useAlbumSubmitGuard`，含重载音频面板入口。
-- **`components/ArtistPicker.tsx`**：艺术家多选/新增控件（角色 Primary/Featured/Composer/... + 排序），红/绿两色精确匹配指示。
-- **`components/AlbumPicker.tsx`**：专辑信息表单控件，标题字段红/黄/绿三色匹配指示（本项目最新完成的核心功能），厂牌字段红/绿两色指示；导出 `AlbumFormState`/`albumFieldsDirty`/`applyAlbumCandidate` 供 `AlbumSubmitGuard` 复用。
-- **`components/AlbumSubmitGuard.tsx`**（新增）：`useAlbumSubmitGuard()` hook，封装专辑去重确认框（黄灯）与改动确认框（绿灯脏数据）两套 Promise 化弹窗交互逻辑。
-- **`components/TagPicker.tsx`**：标签多选/新增控件（`tag_type` 建议值 + 自由输入）。
-- **`components/Cover.tsx`**：通用封面缩略图组件，异步取二进制数据转 ObjectURL 展示，卸载/切换时释放旧 URL。
-- **`components/BottomPlayerBar.tsx`**：底部播放条，播放/暂停/上下首/进度条拖拽，播放进度触发 `last_heard_date` 记录。
-- **`components/ReloadAudioPanel.tsx`**：重载音频文件面板，选文件替换物理文件并重新提取元信息。
+- 编辑界面中单击艺术家、专辑或已选 Tag 可跳转对应主页，从详情页返回时保留本次未提交的入库草稿。
 
-### 根目录其他文件
+### Music 与歌曲编辑
 
-- **`本地播放器搭建.md`**：原始设计规格文档，**部分内容已过时**（见上文"文档与代码的差异"）。
-- **`tag.md`**：Genre/Tag 分类体系参考列表（纯文档，非代码，尚未在系统中落地为预置数据）。
-- **`electron.vite.config.ts`**：electron-vite 构建配置（main/preload/renderer 三部分，renderer 配了 `@renderer` 别名 + Tailwind postcss 插件）。
-- **`package.json`**：项目名 `venas`，`productName: VENAS`，`version: 0.1.0`。关键依赖：`better-sqlite3`、`electron-store`、`music-metadata`、`react`、`zustand`、`sharp`；开发依赖：`electron`、`electron-vite`、`electron-builder`、`tailwindcss`、`typescript`。脚本：`dev`/`build`/`typecheck`/`postinstall`；安装包通过 `npx electron-builder` 生成。
+Music 页面展示全部已入库歌曲，支持按音乐库顺序、首字母、添加时间排序，并切换升降序。搜索匹配曲名、艺术家、专辑和厂牌（支持日语罗马字、平假名、片假名匹配，例如 `memoria` 可匹配 `メモリア`）。
+
+- 双击歌曲会以当前列表建立播放队列，双击正在播放的同一首会从头开始。
+- 单击随机播放按钮将从当前页面歌曲中开始随机播放。
+- “歌曲信息”默认只读，点击编辑可修改资料。
+- 重载区域可改文件名或选择替换音频，随保存信息一起提交。
+
+- 删除歌曲会删除原始音频、数据库记录和对应图片。关联对象（如专辑、艺术家）失去音乐引用时会执行自动清理。
+
+### Artist、Album 与 Tags
+
+#### 艺术家与厂牌
+
+艺术家分为“Person”“Group”“Label”三种类型，均会在 Artist 页面显示。艺术家主页可编辑名字、类型、国家、头像等信息。厂牌使用 `Label` 类型，在专辑信息中仅可作为厂牌使用。
+
+#### 专辑
+
+Album 页面可搜索专辑、专辑艺术家和厂牌，也支持排序。专辑详情的曲目固定按碟号、音轨号排列，左侧显示音轨号。同一张专辑可关联多个艺术家和多个厂牌。主页可编辑日期、类型、总碟数及上传封面。在入库或歌曲编辑的专辑表单中选择 Single / EP 时，会将碟号与总碟数设为 1。
+
+#### Tags
+
+一首歌可拥有多个 Tag，提供 Genre、Mood、Playlist、Scene、Chart、Theme、Work、Memory、Best、Month、Year 类型。Tag 在主页中可改名、调整类型或删除。
+
+普通 Tag 按名称排列；Year 的 `YYYY`、Month 的 `YYYY.M` / `YYYY.MM` 按实际时间升序排列。具体 Tag 的歌曲按数据库 `sort_order` 展示，可拖拽改变顺序。每首歌在不同 Tag 下可有独立评论，存于 `song_tags.comment`，与歌曲自身评论不同。
+
+### 团队 / 厂牌成员
+
+Group / Label 主页显示已保存的成员列表，点击成员名进入对应艺术家主页，返回键回到原团队主页。编辑页中点击已选成员的名字也可跳转。
+
+### 艺术家别名
+
+艺术家编辑页提供“设为别名”的操作。
+
+- 主艺名与别名仍是独立艺术家记录，通过关联表连接。
+
+- 歌曲保留实际署名，点击别名进入该名义的主页，在名称下显示“a.k.a. 主艺名”。
+
+- 主艺名主页同时汇总其别名名义下的歌曲。
+
+- 别名不是“合并艺术家”：合并会转移关联并删除原艺术家，删除艺术家也会解除其关系并移除头像。
+
+### 播放、歌词与可视化
+
+- 点击底部封面展开全屏播放器，点击左上角向下箭头或按 ESC 收起。
+
+- 底部与全屏共用播放控制、进度条和队列。
+
+- 全屏中的艺术家、专辑，以及可视化上方的 Genre / Mood 均可跳转详情页。
+
+- 带时间戳歌词：LRC 当前句高亮并自动居中。双击任意带时间戳的歌词行可跳转。
+- 纯文本歌词：可浏览，不能逐句同步或跳转。
+- 无歌词可视化：显示实时频谱、可点击跳转的波形、GENRE / MOOD 和三个底部指标。
+
+### 加权随机
+
+随机模式使用下述权重生成每轮顺序——
+
+每轮按权重无放回打乱：每个队列条目播放一次，再生成下一轮。距离上次播放 `d` 个本地日历日时，权重为 `1 + 3 × d / (d + 14)`；当天为 1，14 天为 2.5，从未播放为 4。
+
+### 聆听记录
+
+`last_heard_date` 在本次实际累计聆听达到歌曲总时长的 60% 时记录一次。重复听同一段也累计，暂停、缓冲、加载和拖动进度的跳跃不计入。
 
 ---
 
-## 四、快速上手下一次会话
+## 其他工具
 
-1. 验证代码正确性：`npm run typecheck`（同时检查 `tsconfig.node.json` 与 `tsconfig.web.json` 两个工程）。
-2. 本地运行：`npm run dev`。
-3. 数据库/目录结构以代码为准（`src/main/db/schema.ts`、`src/main/library/paths.ts`），不要直接信任 `本地播放器搭建.md` 中的旧描述。
-4. 全局约定（用户长期偏好，务必遵守）：代码注释一律使用 `/* ... */` 块注释风格，**禁止** JSDoc 风格 `/** ... */`；对话中始终使用中文回复。
+### 网易云音乐导入
+
+先在 **Settings → 存储位置** 选择网易云音乐下载目录，并将适配当前平台的解码工具放入 `.system/tools/`，保证它可执行。点击 Append 右上角“解码网易云音乐”按钮后：
+
+1. 解码下载目录根层的 NCM，将结果移动到 Append；只有导入成功后才删除对应 NCM 源文件。
+2. 将根层 MP3、FLAC 和 LRC 移动到 Append。
+3. 音频导入失败时保留其源文件和同名歌词，并继续处理其他文件。
+4. 弹窗展示本次新增音频，以及缺失封面或失败提示。
+
+### Tag 歌单导出
+
+在 **Tools → Playlist → 生成 Playlist** 中手动导出全部 Tag，生成位置固定为 `<音乐根目录>/Music/Playlist/<Tag 类型>/<Tag 名称>.m3u`。歌曲顺序与 Tag 页面一致（`sort_order`，相同顺序值按歌曲 ID 排列）。
+
+完成后展示类型数、歌单数、独立歌曲数、歌曲条目数和跳过清单，并可打开输出文件夹。
+
+### 音频标签写入
+
+**该操作会修改原音频文件。** 
+
+在 **Tools → 音频标签 → 一键写入** 中将全库歌曲的数据库信息写入对应原音频。实时显示当前歌曲、处理阶段、进度及写入 / 跳过 / 失败数量。离开页面后任务继续运行，返回时恢复当前进度。点击“停止写入”会完成当前歌曲后停止。
+
+数据库中保存音频文件上次写入的 Hash，当上次成功、导出信息 SHA-256、文件完整 SHA-256 和写入器版本均相同时跳过写入。
+
+写入时会覆盖数据库有值的字段，保留未指定字段。艺术家、专辑艺术家、厂牌与 Genre / Mood / Work / Theme 多值用 `/` 拼接。字段详细映射见 [标签映射说明](docs/audio-tag-writeback-handoff.md)。
+
+### 音乐库检查
+
+**Inspect** 提供以下检查
+
+| 检查项         | 行为                            |
+| ----------- | ----------------------------- |
+| 音频文件关联      | 列出数据库存在但原音频缺失的歌曲              |
+| 封面缩略图       | 尝试从关联音频重建缺失缓存，只列出仍不可恢复项       |
+| 未关联图片       | 检查 assets 中未对应数据库歌曲、专辑或艺术家的图片 |
+| 无歌曲专辑       | 列出空专辑，结果弹窗可手动清理               |
+| 无歌曲艺术家 / 厂牌 | 按关联关系检查，结果弹窗可手动清理             |
+| 重名艺术家 / 厂牌  | 列出同名记录及其类型、ID，供人工核对           |
+
+## 软件架构
+
+见 [架构说明文档](docs/architecture.md)

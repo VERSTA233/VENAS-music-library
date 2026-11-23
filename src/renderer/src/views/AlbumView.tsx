@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Pencil } from 'lucide-react'
 import type { AlbumListItem, AlbumListSort, AlbumRow, AlbumSongItem, SortDirection } from '../../../shared/types'
-import { usePlayerStore } from '../stores/playerStore'
+import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
 import SongListToolbarActions from '../components/SongListToolbarActions'
 import RandomPlayButton from '../components/RandomPlayButton'
 import BrowseToolbarActions from '../components/BrowseToolbarActions'
-import AlbumSortControl from '../components/AlbumSortControl'
+import ListSortControl from '../components/ListSortControl'
 import SongEditModal from '../components/SongEditModal'
 import Cover from '../components/Cover'
 import { useNavStore } from '../stores/navStore'
@@ -82,7 +82,7 @@ export default function AlbumView(): React.JSX.Element {
           onQueryChange={setQuery}
           placeholder="搜索专辑、艺术家或厂牌"
           searchLabel="搜索专辑、艺术家或厂牌"
-          sortControl={<AlbumSortControl value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
+          sortControl={<ListSortControl kind="album" value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
           count={filteredAlbums.length}
           countUnit="张"
         />
@@ -104,6 +104,8 @@ export default function AlbumView(): React.JSX.Element {
                 <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-white/[0.05] shadow-lg shadow-black/20 ring-1 ring-white/[0.06] transition duration-200 group-hover:ring-white/[0.18]">
                   <Cover
                     cacheKey={album.id}
+                    thumbnailKey={`album:${album.id}`}
+                    resource={{ kind: 'album', id: album.id }}
                     load={() => window.api.albums.cover(album.id)}
                     className="w-full h-full object-cover"
                   />
@@ -138,9 +140,8 @@ function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JS
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<AlbumSongItem | null>(null)
   const [editingAlbum, setEditingAlbum] = useState(false)
-  const [pictureVersion, setPictureVersion] = useState(0)
   const [query, setQuery] = useState('')
-  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
+  const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
 
   function load(): void {
     window.api.albums.detail(albumId).then((detail) => {
@@ -161,7 +162,6 @@ function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [albumId])
 
-  const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
   const filteredSongs = useMemo(
     () => filterSongs(songs, query, [album?.title ?? '', ...(album?.labels.map((label) => label.name) ?? [])]),
     [album?.labels, album?.title, query, songs]
@@ -175,7 +175,8 @@ function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JS
         </button>
         <div className="h-8 w-8 shrink-0 overflow-hidden rounded-lg bg-white/5">
           <Cover
-            cacheKey={`${albumId}-${pictureVersion}`}
+            cacheKey={albumId}
+            resource={{ kind: 'album', id: albumId }}
             load={() => window.api.albums.cover(albumId)}
             className="h-full w-full object-cover"
           />
@@ -254,7 +255,6 @@ function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JS
             setEditingAlbum(false)
             load()
           }}
-          onCoverChanged={() => setPictureVersion((version) => version + 1)}
         />
       )}
     </div>

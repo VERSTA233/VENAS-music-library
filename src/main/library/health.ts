@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseFile } from 'music-metadata'
+import { parseAudioMetadata as parseFile } from './audioMetadata'
 import type Database from 'better-sqlite3'
 import type {
   AlbumWithoutSongs,
@@ -20,7 +20,7 @@ export function findMissingAudioFiles(paths: LibraryPaths, db: Database.Database
 }
 
 /* 以播放器实际使用的封面规则检查：专辑歌曲读专辑封面，其他歌曲读独立歌曲封面。 */
-export function findMissingSongCovers(paths: LibraryPaths, db: Database.Database): MissingSongCover[] {
+function findMissingSongCovers(paths: LibraryPaths, db: Database.Database): MissingSongCover[] {
   const songs = db
     .prepare<[], { id: number; title: string; file_name: string; album_id: number | null }>(
       `SELECT s.id, s.title, s.file_name, als.album_id

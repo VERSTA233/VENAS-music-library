@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { ArtistRow } from '../../../shared/types'
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer'
 
 interface LabelPickerProps {
   values: string[]
@@ -8,7 +9,7 @@ interface LabelPickerProps {
   disabled?: boolean
 }
 
-/* 多厂牌选择器：每个值独立匹配 type='Label'，Tab/Enter 接受首个搜索结果。 */
+/* 多厂牌选择器：回车提交输入的名称，Tab 或点击候选项选择已有厂牌。 */
 export default function LabelPicker({ values, onChange, disabled = false }: LabelPickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<ArtistRow[]>([])
@@ -44,14 +45,7 @@ export default function LabelPicker({ values, onChange, disabled = false }: Labe
     })
   }, [query])
 
-  useEffect(() => {
-    if (!open) return
-    function closeOnOutsidePointer(event: PointerEvent): void {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
-  }, [open])
+  useDismissibleLayer(open, [rootRef], () => setOpen(false))
 
   function addLabel(source: string): void {
     const label = source.trim()
@@ -71,7 +65,7 @@ export default function LabelPicker({ values, onChange, disabled = false }: Labe
     <div ref={rootRef} className="relative min-w-0 flex-1">
       <div className="flex min-h-7 flex-wrap items-center gap-1.5">
         {values.map((label, index) => (
-          <span key={`${label}-${index}`} className="inline-flex max-w-full items-center gap-1 rounded-md bg-white/[0.08] px-2 py-1 text-xs text-neutral-200">
+          <span key={`${label}-${index}`} className="inline-flex max-w-full items-center gap-1 rounded-md bg-white/[0.08] px-2 py-0.5 text-xs text-neutral-200">
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${matchStates[label.toLocaleLowerCase()] ? 'bg-green-500' : 'bg-red-500'}`} />
             <span className="truncate">{label}</span>
             <button type="button" onClick={() => removeLabel(index)} disabled={disabled} className="shrink-0 text-neutral-500 transition hover:text-white disabled:opacity-30" title={`移除厂牌 ${label}`} aria-label={`移除厂牌 ${label}`}><X size={12} /></button>
@@ -89,9 +83,10 @@ export default function LabelPicker({ values, onChange, disabled = false }: Labe
           }}
           onBlur={() => addLabel(query)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return
             if (event.key === 'Enter') {
               event.preventDefault()
-              addLabel(suggestions[0]?.name ?? query)
+              addLabel(query)
             } else if (event.key === 'Tab' && suggestions[0]) {
               event.preventDefault()
               addLabel(suggestions[0].name)

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppendEntry,
+  CoverUpdate,
   ParsedArtist,
   IngestRequest,
   IngestResult,
@@ -13,6 +14,7 @@ import type {
   SongUpdateData,
   ArtistRow,
   ArtistAliasOf,
+  ArtistAliasPlan,
   ArtistAliasType,
   ArtistListItem,
   ArtistUpdateData,
@@ -30,9 +32,18 @@ import type {
   LabelAlbumGroup,
   PlaybackSession,
   PlaybackVolume,
+  NowPlayingState,
+  RemoteCommand,
+  MacAudioBackend,
+  AudioOutputSettings,
+  AudioTagWriteProgress,
+  AudioIntegrityProgress,
+  AudioIntegrityProgressUpdate,
   NavigationSession,
   MusicRootInspection,
   MissingAudioFile,
+  PlaylistExportInspection,
+  PlaylistExportOutcome,
   MissingSongCover,
   OrphanPictureFiles,
   AlbumWithoutSongs,
@@ -41,7 +52,8 @@ import type {
   DuplicateArtistNameGroup,
   NeteaseImportResult,
   LibraryMaintenanceState,
-  PlaybackFileInfo
+  PlaybackFileInfo,
+  PlaybackAudioFormat
 } from '../shared/types'
 
 /*
@@ -86,8 +98,8 @@ const api = {
   artists: {
     search: (query: string): Promise<ArtistRow[]> => ipcRenderer.invoke('artists:search', query),
     searchLabels: (query: string): Promise<ArtistRow[]> => ipcRenderer.invoke('artists:searchLabels', query),
-    /* 精确匹配（忽略大小写），用于艺术家编辑器判断入库时是关联已有还是新建 */
-    matchExact: (name: string): Promise<boolean> => ipcRenderer.invoke('artists:matchExact', name),
+    /* 返回精确匹配的艺术家，供绿标展示和主页跳转共用。 */
+    findExact: (name: string): Promise<ArtistRow | null> => ipcRenderer.invoke('artists:findExact', name),
     matchLabelExact: (name: string): Promise<boolean> => ipcRenderer.invoke('artists:matchLabelExact', name),
     /* Artist 星云第一层网格：全量列表（不含厂牌），附带每人关联曲目数 */
     list: (): Promise<ArtistListItem[]> => ipcRenderer.invoke('artists:list'),
@@ -109,7 +121,9 @@ const api = {
     delete: (artistId: number): Promise<void> => ipcRenderer.invoke('artists:delete', artistId),
     merge: (sourceArtistId: number, targetArtistId: number): Promise<void> =>
       ipcRenderer.invoke('artists:merge', sourceArtistId, targetArtistId),
-    setAlias: (aliasArtistId: number, canonicalArtistId: number, aliasType: ArtistAliasType): Promise<void> =>
+    previewAlias: (aliasArtistId: number, canonicalArtistId: number, aliasType: ArtistAliasType): Promise<ArtistAliasPlan> =>
+      ipcRenderer.invoke('artists:previewAlias', aliasArtistId, canonicalArtistId, aliasType),
+    setAlias: (aliasArtistId: number, canonicalArtistId: number | null, aliasType: ArtistAliasType): Promise<void> =>
       ipcRenderer.invoke('artists:setAlias', aliasArtistId, canonicalArtistId, aliasType)
   },
   albums: {
@@ -142,19 +156,34 @@ const api = {
     /* 用完整 song_id 顺序写回 song_tags.sort_order。 */
     setSongOrder: (tagId: number, songIds: number[]): Promise<void> =>
       ipcRenderer.invoke('tags:setSongOrder', tagId, songIds),
-    updateType: (tagId: number, tagType: string | null): Promise<void> =>
-      ipcRenderer.invoke('tags:updateType', tagId, tagType),
     update: (tagId: number, data: TagUpdateData): Promise<void> =>
       ipcRenderer.invoke('tags:update', tagId, data),
     delete: (tagId: number): Promise<void> => ipcRenderer.invoke('tags:delete', tagId)
   },
   playback: {
+    updateNowPlaying: (state: NowPlayingState | null): void =>
+      ipcRenderer.send('playback:updateNowPlaying', state),
+    onRemoteCommand: (callback: (command: RemoteCommand) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, command: RemoteCommand): void => callback(command)
+      ipcRenderer.on('playback:remoteCommand', listener)
+      return () => { ipcRenderer.removeListener('playback:remoteCommand', listener) }
+    },
+    getAudioOutput: (): Promise<AudioOutputSettings> => ipcRenderer.invoke('playback:getAudioOutput'),
+    setAudioOutput: (backend: MacAudioBackend): Promise<AudioOutputSettings> => ipcRenderer.invoke('playback:setAudioOutput', backend),
+    getSystemSuspended: (): Promise<boolean> => ipcRenderer.invoke('playback:getSystemSuspended'),
+    onSystemSuspended: (callback: (suspended: boolean) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, suspended: boolean) => callback(suspended)
+      ipcRenderer.on('playback:systemSuspended', listener)
+      return () => { ipcRenderer.removeListener('playback:systemSuspended', listener) }
+    },
     getVolume: (): Promise<PlaybackVolume> => ipcRenderer.invoke('playback:getVolume'),
     setVolume: (value: PlaybackVolume): Promise<void> => ipcRenderer.invoke('playback:setVolume', value),
     inspectFile: (mediaUrl: string): Promise<PlaybackFileInfo> => ipcRenderer.invoke('playback:inspectFile', mediaUrl),
+    formatInfo: (mediaUrl: string): Promise<PlaybackAudioFormat> => ipcRenderer.invoke('playback:formatInfo', mediaUrl),
     getGapless: (): Promise<boolean> => ipcRenderer.invoke('playback:getGapless'),
     setGapless: (enabled: boolean): Promise<void> => ipcRenderer.invoke('playback:setGapless', enabled),
-    touchLastHeard: (songId: number): Promise<void> => ipcRenderer.invoke('playback:touchLastHeard', songId),
+    touchLastHeard: (songId: number): Promise<string> => ipcRenderer.invoke('playback:touchLastHeard', songId),
+    lastHeardDates: (): Promise<{ songId: number; date: string }[]> => ipcRenderer.invoke('playback:lastHeardDates'),
     getSession: (): Promise<PlaybackSession | null> => ipcRenderer.invoke('playback:getSession'),
     saveSession: (session: PlaybackSession | null): Promise<void> => ipcRenderer.invoke('playback:saveSession', session)
   },
@@ -163,6 +192,27 @@ const api = {
     saveSession: (session: NavigationSession): Promise<void> => ipcRenderer.invoke('navigation:saveSession', session)
   },
   library: {
+    onCoverUpdated: (callback: (update: CoverUpdate) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, update: CoverUpdate) => callback(update)
+      ipcRenderer.on('library:coverUpdated', listener)
+      return () => { ipcRenderer.removeListener('library:coverUpdated', listener) }
+    },
+    getAudioIntegrityProgress: (): Promise<AudioIntegrityProgress> => ipcRenderer.invoke('library:getAudioIntegrityProgress'),
+    startAudioIntegrityScan: (): Promise<AudioIntegrityProgress> => ipcRenderer.invoke('library:startAudioIntegrityScan'),
+    cancelAudioIntegrityScan: (): Promise<AudioIntegrityProgress> => ipcRenderer.invoke('library:cancelAudioIntegrityScan'),
+    onAudioIntegrityProgress: (callback: (progress: AudioIntegrityProgressUpdate) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: AudioIntegrityProgressUpdate) => callback(progress)
+      ipcRenderer.on('library:audioIntegrityProgress', listener)
+      return () => { ipcRenderer.removeListener('library:audioIntegrityProgress', listener) }
+    },
+    getAudioTagProgress: (): Promise<AudioTagWriteProgress | null> => ipcRenderer.invoke('library:getAudioTagProgress'),
+    startAudioTagWrite: (): Promise<AudioTagWriteProgress> => ipcRenderer.invoke('library:startAudioTagWrite'),
+    cancelAudioTagWrite: (): Promise<AudioTagWriteProgress | null> => ipcRenderer.invoke('library:cancelAudioTagWrite'),
+    onAudioTagProgress: (callback: (progress: AudioTagWriteProgress) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: AudioTagWriteProgress) => callback(progress)
+      ipcRenderer.on('library:audioTagProgress', listener)
+      return () => { ipcRenderer.removeListener('library:audioTagProgress', listener) }
+    },
     getMaintenanceState: (): Promise<LibraryMaintenanceState | null> => ipcRenderer.invoke('library:getMaintenanceState'),
     onMaintenanceChange: (callback: (state: LibraryMaintenanceState | null) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, state: LibraryMaintenanceState | null) => callback(state)
@@ -172,6 +222,10 @@ const api = {
     getRoots: (): Promise<{ musicRoot: string; systemRoot: string; neteaseMusicRoot: string | null }> =>
       ipcRenderer.invoke('library:getRoots'),
     checkMissingAudio: (): Promise<MissingAudioFile[]> => ipcRenderer.invoke('library:checkMissingAudio'),
+    inspectPlaylistExport: (): Promise<PlaylistExportInspection> => ipcRenderer.invoke('library:inspectPlaylistExport'),
+    generatePlaylists: (token: string, skipMissing: boolean): Promise<PlaylistExportOutcome> => ipcRenderer.invoke('library:generatePlaylists', token, skipMissing),
+    cancelPlaylistExport: (token: string): Promise<void> => ipcRenderer.invoke('library:cancelPlaylistExport', token),
+    openPlaylistFolder: (): Promise<void> => ipcRenderer.invoke('library:openPlaylistFolder'),
     checkMissingCovers: (): Promise<MissingSongCover[]> => ipcRenderer.invoke('library:checkMissingCovers'),
     checkOrphanPictures: (): Promise<OrphanPictureFiles> => ipcRenderer.invoke('library:checkOrphanPictures'),
     checkAlbumsWithoutSongs: (): Promise<AlbumWithoutSongs[]> => ipcRenderer.invoke('library:checkAlbumsWithoutSongs'),

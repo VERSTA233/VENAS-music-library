@@ -5,7 +5,12 @@ import tailwindcss from '@tailwindcss/postcss'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: { index: resolve('src/main/index.ts'), audioTagWorker: resolve('src/main/library/audioTagWorker.ts') }
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()]

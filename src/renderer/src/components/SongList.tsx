@@ -2,13 +2,8 @@ import type { SongListItem } from '../../../shared/types'
 import { GripVertical, MoreHorizontal } from 'lucide-react'
 import { Reorder, useDragControls } from 'motion/react'
 import Cover from './Cover'
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return '--:--'
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-}
+import { formatTime } from '../playbackHelpers'
+import { memo, useCallback, useLayoutEffect, useRef } from 'react'
 
 interface SongListProps<T extends SongListItem> {
   songs: T[]
@@ -28,16 +23,17 @@ interface SongListProps<T extends SongListItem> {
   onReorderEnd?: () => void
 }
 
-interface SongListRowProps<T extends SongListItem> extends Omit<SongListProps<T>, 'songs' | 'onReorder' | 'onReorderEnd'> {
+interface SongListRowProps<T extends SongListItem> extends Omit<SongListProps<T>, 'songs' | 'currentSongId' | 'onReorder' | 'onReorderEnd'> {
   song: T
   index: number
+  isCurrent: boolean
   onStartDrag?: (event: React.PointerEvent<HTMLButtonElement>) => void
 }
 
 function SongListRow<T extends SongListItem>({
   song,
   index,
-  currentSongId,
+  isCurrent,
   onPlay,
   onEdit,
   renderLeading,
@@ -57,7 +53,7 @@ function SongListRow<T extends SongListItem>({
           onPlay(index)
         }}
         className={`library-row group flex min-h-16 items-center gap-3 rounded-xl px-3 py-2.5 cursor-default hover:bg-white/[0.06] ${
-          song.id === currentSongId ? 'bg-white/[0.11] ring-1 ring-white/[0.06]' : ''
+          isCurrent ? 'bg-white/[0.11] ring-1 ring-white/[0.06]' : ''
         }`}
       >
         {onStartDrag && (
@@ -76,6 +72,8 @@ function SongListRow<T extends SongListItem>({
         {showCover && (
           <Cover
             cacheKey={song.id}
+            thumbnailKey={`song:${song.id}`}
+            resource={{ kind: 'song', id: song.id }}
             load={() => window.api.songs.cover(song.id)}
             className="h-10 w-10 shrink-0 rounded-lg object-cover shadow-sm"
           />
@@ -84,7 +82,7 @@ function SongListRow<T extends SongListItem>({
           <div className="truncate text-sm font-medium text-neutral-100">{song.title}</div>
           <div className="truncate text-xs text-neutral-500">{song.artistNames || '未知艺术家'}</div>
         </div>
-        <span className="w-12 shrink-0 text-right text-sm font-mono leading-none tabular-nums text-neutral-500">{formatDuration(song.length)}</span>
+        <span className="w-12 shrink-0 text-right text-sm font-mono leading-none tabular-nums text-neutral-500">{formatTime(song.length)}</span>
         {renderActions?.(song, index)}
         <button
           onClick={(event) => {
@@ -103,20 +101,23 @@ function SongListRow<T extends SongListItem>({
   )
 }
 
+const MemoizedSongListRow = memo(SongListRow) as typeof SongListRow
+
 function SortableSongListRow<T extends SongListItem>({
   onReorderEnd,
   ...rowProps
 }: SongListRowProps<T> & { onReorderEnd: () => void }): React.JSX.Element {
   const dragControls = useDragControls()
+  const startDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    dragControls.start(event)
+  }, [dragControls])
 
   return (
     <Reorder.Item value={rowProps.song} drag="y" dragListener={false} dragControls={dragControls} onDragEnd={onReorderEnd} className="list-none">
-      <SongListRow
+      <MemoizedSongListRow
         {...rowProps}
-        onStartDrag={(event) => {
-          event.stopPropagation()
-          dragControls.start(event)
-        }}
+        onStartDrag={startDrag}
       />
     </Reorder.Item>
   )
@@ -135,12 +136,17 @@ export default function SongList<T extends SongListItem>({
   onReorder,
   onReorderEnd
 }: SongListProps<T>): React.JSX.Element {
+  /* 保留稳定的行回调；排序/筛选后使用最新处理函数，不因父组件的内联函数刷新所有行。 */
+  const handlers = useRef({ onPlay, onEdit })
+  useLayoutEffect(() => { handlers.current = { onPlay, onEdit } }, [onPlay, onEdit])
+  const play = useCallback((index: number) => handlers.current.onPlay(index), [])
+  const edit = useCallback((song: T) => handlers.current.onEdit(song), [])
   const rowProps = (song: T, index: number): SongListRowProps<T> => ({
     song,
     index,
-    currentSongId,
-    onPlay,
-    onEdit,
+    isCurrent: song.id === currentSongId,
+    onPlay: play,
+    onEdit: edit,
     renderLeading,
     showCover,
     renderActions,
@@ -157,7 +163,7 @@ export default function SongList<T extends SongListItem>({
 
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2">
-      {songs.map((song, index) => <SongListRow key={song.id} {...rowProps(song, index)} />)}
+      {songs.map((song, index) => <MemoizedSongListRow key={song.id} {...rowProps(song, index)} />)}
     </div>
   )
 }

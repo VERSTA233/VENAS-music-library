@@ -12,19 +12,18 @@ import type {
   ArtistListSort,
   SortDirection
 } from '../../../shared/types'
-import { usePlayerStore } from '../stores/playerStore'
+import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
-import { sortSongs } from '../components/SongSortControl'
 import SongListToolbarActions from '../components/SongListToolbarActions'
 import RandomPlayButton from '../components/RandomPlayButton'
 import BrowseToolbarActions from '../components/BrowseToolbarActions'
-import ArtistSortControl from '../components/ArtistSortControl'
+import ListSortControl from '../components/ListSortControl'
 import SongEditModal from '../components/SongEditModal'
 import ArtistEditModal from '../components/ArtistEditModal'
 import Cover from '../components/Cover'
 import { useNavStore } from '../stores/navStore'
-import { filterArtists, filterSongs } from '../songSearch'
+import { filterArtists, filterSongs, sortSongs } from '../songSearch'
 
 type GridItem = ArtistListItem | LabelListItem
 
@@ -47,6 +46,7 @@ export default function ArtistView(): React.JSX.Element {
   const [items, setItems] = useState<GridItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selected | null>(null)
+  const [memberHistory, setMemberHistory] = useState<Selected[]>([])
   const [sort, setSort] = useState<ArtistListSort>('name')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [query, setQuery] = useState('')
@@ -63,12 +63,20 @@ export default function ArtistView(): React.JSX.Element {
   /* 外部导航进来时（如点击歌曲信息里的艺术家/厂牌链接），自动选中对应的艺术家/厂牌详情页 */
   useEffect(() => {
     if (!target || target.view !== 'artist') return
+    setMemberHistory([])
     setSelected({ id: target.id, isLabel: target.isLabel })
     clearTarget()
   }, [target, clearTarget])
 
   /* 详情页返回：若是从 Music 列表跳转过来的，跨视图返回原位置（含滚动），否则退回本视图的第一层网格 */
   function handleDetailBack(): void {
+    if (memberHistory.length) {
+      const previous = memberHistory[memberHistory.length - 1]
+      setMemberHistory((history) => history.slice(0, -1))
+      setSelected(previous)
+      void window.api.navigation.saveSession({ view: 'artist', target: { view: 'artist', ...previous } }).catch(() => undefined)
+      return
+    }
     if (requestReturn()) return
     setSelected(null)
     openRoot('artist')
@@ -76,9 +84,21 @@ export default function ArtistView(): React.JSX.Element {
 
   function handleDetailDeleted(id: number): void {
     setItems((current) => current.filter((item) => item.id !== id))
+    if (memberHistory.length) {
+      handleDetailBack()
+      return
+    }
     setSelected(null)
     if (requestReturn()) return
     openRoot('artist')
+  }
+
+  function handleMemberNavigate(member: ArtistRow): void {
+    if (!selected || selected.id === member.id) return
+    const next = { id: member.id, isLabel: member.type === 'Label' }
+    setMemberHistory((history) => [...history, selected])
+    setSelected(next)
+    void window.api.navigation.saveSession({ view: 'artist', target: { view: 'artist', ...next } }).catch(() => undefined)
   }
 
   const filteredItems = useMemo(() => filterArtists(items, query), [items, query])
@@ -99,9 +119,9 @@ export default function ArtistView(): React.JSX.Element {
 
   if (selected !== null) {
     return selected.isLabel ? (
-      <LabelDetail labelId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} />
+      <LabelDetail key={`label:${selected.id}`} labelId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} onMemberNavigate={handleMemberNavigate} />
     ) : (
-      <ArtistDetail artistId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} />
+      <ArtistDetail key={`artist:${selected.id}`} artistId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} onMemberNavigate={handleMemberNavigate} />
     )
   }
 
@@ -114,7 +134,7 @@ export default function ArtistView(): React.JSX.Element {
           onQueryChange={setQuery}
           placeholder="搜索艺术家或厂牌"
           searchLabel="搜索艺术家或厂牌"
-          sortControl={<ArtistSortControl value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
+          sortControl={<ListSortControl kind="artist" value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
           count={filteredItems.length}
           countUnit="位"
         />
@@ -138,6 +158,8 @@ export default function ArtistView(): React.JSX.Element {
                   <div className="aspect-square w-full overflow-hidden rounded-full bg-white/[0.05] shadow-lg shadow-black/20 ring-1 ring-white/[0.06] transition duration-200 group-hover:ring-white/[0.18]">
                     <Cover
                       cacheKey={item.id}
+                      thumbnailKey={`artist:${item.id}`}
+                      resource={{ kind: 'artist', id: item.id }}
                       load={() => window.api.artists.picture(item.id)}
                       className="w-full h-full object-cover"
                     />
@@ -160,10 +182,11 @@ interface ArtistDetailProps {
   artistId: number
   onBack: () => void
   onDeleted: () => void
+  onMemberNavigate: (member: ArtistRow) => void
 }
 
 /* 艺术家二级详情页：聚合展示该艺术家在 song_artists 表中关联的全部曲目 */
-function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React.JSX.Element {
+function ArtistDetail({ artistId, onBack, onDeleted, onMemberNavigate }: ArtistDetailProps): React.JSX.Element {
   const [artist, setArtist] = useState<ArtistRow | null>(null)
   const [aliasOf, setAliasOf] = useState<ArtistAliasOf | null>(null)
   const [members, setMembers] = useState<ArtistRow[]>([])
@@ -171,11 +194,10 @@ function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<SongListItem | null>(null)
   const [editingArtist, setEditingArtist] = useState(false)
-  const [pictureVersion, setPictureVersion] = useState(0)
   const [sort, setSort] = useState<SongListSort>('library')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [query, setQuery] = useState('')
-  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
+  const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
 
   useEffect(() => {
     setLoading(true)
@@ -192,7 +214,6 @@ function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React
     })
   }, [artistId])
 
-  const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
   const filteredSongs = useMemo(
     () => filterSongs(songs, query, [artist?.name ?? '']),
     [artist?.name, query, songs]
@@ -230,7 +251,8 @@ function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React
         </button>
         <div className="w-8 h-8 rounded-full overflow-hidden bg-white/5 flex-shrink-0">
           <Cover
-            cacheKey={`${artistId}-${pictureVersion}`}
+            cacheKey={artistId}
+            resource={{ kind: 'artist', id: artistId }}
             load={() => window.api.artists.picture(artistId)}
             className="w-full h-full object-cover"
           />
@@ -263,6 +285,7 @@ function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
+        {!loading && <MemberLinks members={members} onNavigate={onMemberNavigate} />}
         {loading ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
         ) : filteredSongs.length === 0 ? (
@@ -301,11 +324,10 @@ function ArtistDetail({ artistId, onBack, onDeleted }: ArtistDetailProps): React
           onClose={() => setEditingArtist(false)}
           onSaved={() => {
             setEditingArtist(false)
-            setPictureVersion((v) => v + 1)
             refresh()
           }}
           onDeleted={onDeleted}
-          onPictureChanged={() => setPictureVersion((v) => v + 1)}
+          onNavigateMember={onMemberNavigate}
         />
       )}
     </div>
@@ -316,24 +338,24 @@ interface LabelDetailProps {
   labelId: number
   onBack: () => void
   onDeleted: () => void
+  onMemberNavigate: (member: ArtistRow) => void
 }
 
 /*
  * 厂牌二级详情页：按专辑分组展示旗下全部曲目（组内按碟号/曲目号排序），
  * 双击任一曲目将播放队列重置为该厂牌下全部专辑的全部曲目（跨专辑按分组顺序拼接）。
  */
-function LabelDetail({ labelId, onBack, onDeleted }: LabelDetailProps): React.JSX.Element {
+function LabelDetail({ labelId, onBack, onDeleted, onMemberNavigate }: LabelDetailProps): React.JSX.Element {
   const [label, setLabel] = useState<ArtistRow | null>(null)
   const [members, setMembers] = useState<ArtistRow[]>([])
   const [groups, setGroups] = useState<LabelAlbumGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<AlbumSongItem | null>(null)
   const [editingLabel, setEditingLabel] = useState(false)
-  const [pictureVersion, setPictureVersion] = useState(0)
   const [sort, setSort] = useState<SongListSort>('library')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [query, setQuery] = useState('')
-  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
+  const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
 
   function load(): void {
     window.api.artists.labelDetail(labelId).then((detail) => {
@@ -354,7 +376,6 @@ function LabelDetail({ labelId, onBack, onDeleted }: LabelDetailProps): React.JS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labelId])
 
-  const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
   const filteredGroups = useMemo(
     () => groups
       .map((group) => ({
@@ -388,7 +409,8 @@ function LabelDetail({ labelId, onBack, onDeleted }: LabelDetailProps): React.JS
         </button>
         <div className="w-8 h-8 rounded-full overflow-hidden bg-white/5 flex-shrink-0">
           <Cover
-            cacheKey={`${labelId}-${pictureVersion}`}
+            cacheKey={labelId}
+            resource={{ kind: 'artist', id: labelId }}
             load={() => window.api.artists.picture(labelId)}
             className="w-full h-full object-cover"
           />
@@ -419,6 +441,7 @@ function LabelDetail({ labelId, onBack, onDeleted }: LabelDetailProps): React.JS
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
+        {!loading && <MemberLinks members={members} onNavigate={onMemberNavigate} />}
         {loading ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
         ) : sortedGroups.length === 0 ? (
@@ -476,13 +499,26 @@ function LabelDetail({ labelId, onBack, onDeleted }: LabelDetailProps): React.JS
           onClose={() => setEditingLabel(false)}
           onSaved={() => {
             setEditingLabel(false)
-            setPictureVersion((v) => v + 1)
             load()
           }}
           onDeleted={onDeleted}
-          onPictureChanged={() => setPictureVersion((v) => v + 1)}
+          onNavigateMember={onMemberNavigate}
         />
       )}
+    </div>
+  )
+}
+
+function MemberLinks({ members, onNavigate }: { members: ArtistRow[]; onNavigate: (member: ArtistRow) => void }): React.JSX.Element | null {
+  if (!members.length) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-white/[0.06] px-4 pb-2 text-sm">
+      <span className="mr-1 text-xs text-neutral-500">成员</span>
+      {members.map((member) => (
+        <button key={member.id} type="button" onClick={() => onNavigate(member)}
+          className="max-w-full truncate rounded-lg px-2 py-1.5 text-neutral-300 transition hover:bg-white/[0.05] hover:text-white"
+          title={`查看艺术家 ${member.name}`}>{member.name}</button>
+      ))}
     </div>
   )
 }

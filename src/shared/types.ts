@@ -6,6 +6,8 @@
 
 export interface AppendEntry {
   fileName: string
+  /* 文件内容变化时使列表缩略图和元数据失效；旧播放会话没有该字段。 */
+  fileRevision?: string
   title: string
   artist: string | null
   album: string | null
@@ -30,13 +32,83 @@ export interface AppendEntry {
 /* 网易云音乐导入的处理结果。audioFiles 仅包含本次已成功进入 Append 的音频文件。 */
 export interface NeteaseImportResult {
   audioFiles: string[]
+  /* audioFiles 中没有内嵌封面的文件名（Append 内的最终文件名）。 */
+  missingCoverFiles: string[]
   failedFiles: { fileName: string; message: string }[]
 }
+
+export interface CoverUpdate {
+  songIds: number[]
+  albumIds: number[]
+  artistIds: number[]
+}
+
+export type CoverResource = { kind: 'song' | 'album' | 'artist'; id: number }
 
 /* 应用音量独立于播放会话保存；静音时保留原音量。 */
 export interface PlaybackVolume {
   volume: number
   muted: boolean
+}
+
+export type RemoteCommand = 'play' | 'pause' | 'toggle' | 'next' | 'previous'
+
+export interface NowPlayingState {
+  title: string
+  artist: string
+  duration: number
+  position: number
+  playing: boolean
+}
+
+export type MacAudioBackend = 'avfoundation' | 'auhal'
+
+export interface AudioOutputSettings {
+  supported: boolean
+  selectedBackend: MacAudioBackend
+  activeBackend: MacAudioBackend | null
+  launchOverride: boolean
+}
+
+export interface AudioTagWriteProgress {
+  taskId: string
+  revision: number
+  status: 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed'
+  phase: 'checking' | 'preparing' | 'validating' | 'committing'
+  total: number
+  completed: number
+  written: number
+  skipped: number
+  failed: number
+  currentSong: { songId: number; title: string; fileName: string } | null
+  errors: { songId: number | null; title: string; fileName: string; message: string }[]
+}
+
+export interface AudioIntegrityIssue {
+  songId: number
+  title: string
+  fileName: string
+  kind: 'problem' | 'failed'
+  message: string
+}
+
+export interface AudioIntegrityProgress {
+  revision: number
+  status: 'idle' | 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed'
+  phase: 'hashing' | 'decoding'
+  total: number
+  completed: number
+  scanned: number
+  skipped: number
+  failed: number
+  currentSong: { songId: number; title: string; fileName: string } | null
+  issues: AudioIntegrityIssue[]
+  error: string | null
+}
+
+/* 实时通知只携带计数与有变化的问题；进入页面、开始/停止操作返回完整快照。 */
+export interface AudioIntegrityProgressUpdate extends Omit<AudioIntegrityProgress, 'issues'> {
+  issueChanges: { songId: number; issue: AudioIntegrityIssue | null }[]
 }
 
 /* 应用重启后恢复到底部播放器的会话；mediaUrl 是已注册的 venas-media 协议地址，可直接继续使用。 */
@@ -54,9 +126,11 @@ export interface PlaybackSession {
   currentTime: number
   playbackMode: 'sequential' | 'shuffle'
   shuffleOrder: number[]
+  nextShuffleOrder?: number[]
+  previousShuffleOrder?: number[]
 }
 
-export type NavigationView = 'append' | 'music' | 'artist' | 'album' | 'tag' | 'settings'
+export type NavigationView = 'append' | 'music' | 'artist' | 'album' | 'tag' | 'tools' | 'inspect' | 'settings'
 
 export type NavigationTarget =
   | { view: 'artist'; id: number; isLabel: boolean }
@@ -82,6 +156,26 @@ export interface MissingAudioFile {
   title: string
   fileName: string
 }
+
+/* token 对应主进程持有的本次数据库快照，确认缺失歌曲后仍使用同一份数据。 */
+export interface PlaylistExportInspection {
+  token: string
+  missingFiles: MissingAudioFile[]
+}
+
+export interface PlaylistExportResult {
+  directory: string
+  typeCount: number
+  playlistCount: number
+  songCount: number
+  entryCount: number
+  skippedFiles: MissingAudioFile[]
+  warnings: string[]
+}
+
+export type PlaylistExportOutcome =
+  | { status: 'confirmation-required'; inspection: PlaylistExportInspection }
+  | { status: 'complete'; result: PlaylistExportResult }
 
 export interface MissingSongCover {
   songId: number
@@ -125,12 +219,18 @@ export interface ParsedArtist {
   order: number
 }
 
-export interface IngestArtistInput {
+export interface ArtistSelectionInput {
   name: string
+  /* 选择已有艺术家时按 ID 关联，允许不同艺术家同名。 */
+  artistId?: number
+  /* 显式新增，不按名称复用已有记录；同一次保存中同名新增项共用一条新记录。 */
+  createNew?: boolean
+  type: 'Person' | 'Group' | null
+}
+
+export interface IngestArtistInput extends ArtistSelectionInput {
   role: string
   order: number
-  /* 用户为新艺术家（未匹配数据库，即将新建）指定的类型，仅在新建时写入；已匹配到已有艺术家时忽略此字段 */
-  type: 'Person' | 'Group' | null
 }
 
 export interface IngestTagInput {
@@ -269,7 +369,7 @@ export interface SongUpdateData {
   lyric: string | null
   /* 用户在编辑歌曲时通过选择器导入的歌词源文件；更新成功后删除，null 表示不关联源文件 */
   lyricFilePath: string | null
-  artists: { name: string; role: string; order: number; type: 'Person' | 'Group' | null }[]
+  artists: IngestArtistInput[]
   tagIds: number[]
   /* null 表示不属于任何专辑（若歌曲此前有专辑关联，会被解除） */
   album: IngestAlbumInput | null
@@ -293,6 +393,14 @@ export interface ArtistAliasOf {
   id: number
   name: string
   aliasType: ArtistAliasType | null
+}
+
+/* 别名归并前的只读预览；aliases 列出保存后的署名、类型，供用户确认。 */
+export interface ArtistAliasPlan {
+  selectedArtist: { id: number; name: string }
+  canonicalArtist: { id: number; name: string }
+  aliases: ArtistAliasOf[]
+  needsConfirmation: boolean
 }
 
 /* 艺术家编辑弹窗保存用；type 缺省时保留厂牌的 Label 类型。 */
@@ -356,7 +464,7 @@ export interface AlbumUpdateData {
   albumType: string | null
   totalDiscs: number | null
   labels: string[]
-  artists: { name: string; order: number; type: 'Person' | 'Group' | null }[]
+  artists: (ArtistSelectionInput & { order: number })[]
 }
 
 /* 同名专辑去重下拉框用：附带专辑艺术家拼接字符串，供用户在多个同名专辑间辨认选择 */
@@ -395,6 +503,11 @@ export interface LibraryMaintenanceState {
   phase: 'waiting' | 'copying' | 'verifying' | 'finishing'
   completed: number
   total: number
+}
+
+/* 源文件格式信息，与 AudioContext 重采样后的分析格式分开。 */
+export interface PlaybackAudioFormat {
+  sampleRate: number | null
 }
 
 /* 解码前估算内存，version 用于检测读取期间的文件替换。 */

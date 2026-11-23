@@ -7,7 +7,7 @@ import {
 } from './AlbumPicker'
 
 /* check() 的返回结果：proceed=false 时 album 是已还原/待用户重新处理的值，调用方应回填表单且不要提交 */
-export interface AlbumGuardResult {
+interface AlbumGuardResult {
   proceed: boolean
   album: AlbumFormState
 }

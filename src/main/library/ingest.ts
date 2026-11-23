@@ -1,9 +1,9 @@
 import { renameSync, existsSync, statSync, unlinkSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { parseFile } from 'music-metadata'
+import { parseAudioMetadata as parseFile } from './audioMetadata'
 import type { LibraryPaths } from './paths'
 import { getDatabase } from '../db'
-import { findOrCreateArtist } from '../db/queries/artists'
+import { createIngestArtistSelectionResolver } from './artistSelection'
 import { createTag } from '../db/queries/tags'
 import { createAlbum, updateAlbumFields, setSongAlbum, setAlbumArtists, type AlbumArtistInput } from '../db/queries/albums'
 import { createSong, setSongArtists, setSongTags, isFileNameTaken, type SongArtistInput } from '../db/queries/songs'
@@ -18,9 +18,7 @@ import {
 } from './orphanCleanup'
 import type { IngestRequest, IngestResult } from '../../shared/types'
 
-export type { IngestRequest, IngestResult }
-
-export class IngestConflictError extends Error {}
+class IngestConflictError extends Error {}
 
 /* 格式化为 "YYYY-MM-DD HH:MM:SS" 本地时间，与库内 DATETIME('now','localtime') 的格式保持一致 */
 function formatLocalDateTime(d: Date): string {
@@ -71,6 +69,7 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
   let cleanupResult: OrphanCleanupResult = { albumIds: [], artistIds: [] }
   try {
     songId = db.transaction(() => {
+      const { resolveSong, resolveAlbum } = createIngestArtistSelectionResolver(db)
       const id = createSong(db, {
         title: req.title,
         length,
@@ -79,7 +78,7 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
       })
 
       const artistInputs: SongArtistInput[] = req.artists.filter((a) => a.name.trim()).map((a, order) => ({
-        artistId: findOrCreateArtist(db, a.name.trim(), a.type),
+        artistId: resolveSong(a),
         role: a.role,
         order
       }))
@@ -108,10 +107,16 @@ export async function ingestSong(paths: LibraryPaths, req: IngestRequest): Promi
         setSongAlbum(db, id, albumId, req.album.discNumber, req.album.trackNumber)
 
         // 入库确认即视为用户确认应用当前专辑信息；空列表表示明确清空已有专辑艺术家关联。
-        const albumArtistInputs: AlbumArtistInput[] = req.album.artists.filter((a) => a.name.trim()).map((a, order) => ({
-          artistId: findOrCreateArtist(db, a.name.trim(), a.type),
-          order
-        }))
+        const albumArtistIds = new Set<number>()
+        const albumArtistInputs: AlbumArtistInput[] = req.album.artists
+          .filter((a) => a.name.trim())
+          .map((a) => resolveAlbum(a))
+          .filter((artistId) => {
+            if (albumArtistIds.has(artistId)) return false
+            albumArtistIds.add(artistId)
+            return true
+          })
+          .map((artistId, order) => ({ artistId, order }))
         setAlbumArtists(db, albumId, albumArtistInputs)
       }
 

@@ -125,6 +125,31 @@ CREATE TABLE IF NOT EXISTS song_info (
     FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
 );
 
+/* 每首歌只保存最新写入状态；只有 succeeded 且两种哈希及规则版本一致才可跳过。
+ * 哈希与版本描述当前尝试的快照，只有 status=succeeded 才表示已验证成功；文件哈希为 SHA-256。
+ * status: pending / writing / succeeded / failed；中断遗留的 writing 必须重试。
+ */
+CREATE TABLE IF NOT EXISTS audio_tag_write_state (
+    song_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'pending',
+    metadata_hash TEXT,
+    file_hash TEXT,
+    writer_version TEXT,
+    error_info TEXT,
+    FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
+);
+
+/* 仅完成的 ok 可复用；problem、scanning/failed（包括退出中断）下次重试。
+ * file_hash 为完整源文件 SHA-256，scanner_version 包含解码器版本与检查规则版本。
+ */
+CREATE TABLE IF NOT EXISTS audio_integrity_scan_state (
+    song_id INTEGER PRIMARY KEY REFERENCES songs(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    file_hash TEXT,
+    scanner_version TEXT,
+    error_info TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_song_artists_artist_id ON song_artists(artist_id);
 CREATE INDEX IF NOT EXISTS idx_album_songs_song_id ON album_songs(song_id);
 CREATE INDEX IF NOT EXISTS idx_album_artists_artist_id ON album_artists(artist_id);

@@ -2,8 +2,6 @@ import type Database from 'better-sqlite3'
 import type { TagRow, TagTypeItem, TagListItem, TagSongItem } from '../../../shared/types'
 import { withArtistNames } from './songList'
 
-export type { TagRow }
-
 /* Tag 分类导航第一层：全部 tag_type 分组，附带该类型下的 Tag 数量，按类型名排序 */
 export function listTagTypes(db: Database.Database): TagTypeItem[] {
   return db
@@ -94,12 +92,6 @@ function requireTagName(name: string): string {
 export function createTag(db: Database.Database, name: string, tagType: string): number {
   const info = db.prepare('INSERT INTO tags (name, tag_type) VALUES (?, ?)').run(requireTagName(name), tagType)
   return Number(info.lastInsertRowid)
-}
-
-/* Tag 类型允许为空；空值会在分类视图中归入“未分类”。 */
-export function updateTagType(db: Database.Database, tagId: number, tagType: string | null): void {
-  const result = db.prepare('UPDATE tags SET tag_type = ? WHERE id = ?').run(tagType, tagId)
-  if (result.changes === 0) throw new Error('Tag 不存在')
 }
 
 /* Tag 改名保持原 id 和歌曲关联，并按不区分大小写的规则避免重名。 */

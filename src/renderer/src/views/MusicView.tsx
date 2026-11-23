@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useLibraryStore } from '../stores/libraryStore'
-import { usePlayerStore } from '../stores/playerStore'
+import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
 import SongEditModal from '../components/SongEditModal'
@@ -12,7 +12,7 @@ import { useNavStore } from '../stores/navStore'
 /* Music 库列表视图：完整展示 songs 表，双击播放，"..." 进入编辑弹窗。 */
 export default function MusicView(): React.JSX.Element {
   const { songs, total, sort, sortDirection, query, loading, ensureSongs, fetchSongs, setSort, setSortDirection, setQuery } = useLibraryStore()
-  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
+  const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
   const [editingSong, setEditingSong] = useState<SongListItem | null>(null)
   const [searchInput, setSearchInput] = useState(query)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -41,7 +41,6 @@ export default function MusicView(): React.JSX.Element {
     clearRestoreSignal()
   }, [restoreSignal, clearRestoreSignal, setQuery])
 
-  const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
   return (
     <div className="flex flex-col h-full">
       <div className="library-toolbar sticky top-0 z-10 justify-between border-b border-white/[0.08]">

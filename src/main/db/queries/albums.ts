@@ -3,8 +3,6 @@ import type { AlbumRow, AlbumLabel, AlbumListItem, AlbumMatchCandidate, SongAlbu
 import { findOrCreateLabelArtist } from './artists'
 import { withArtistNames } from './songList'
 
-export type { AlbumRow }
-
 export interface AlbumArtistInput {
   artistId: number
   order: number
@@ -18,7 +16,7 @@ const ALBUM_SELECT = `
   FROM albums al
 `
 
-export function getAlbumLabels(db: Database.Database, albumId: number): AlbumLabel[] {
+function getAlbumLabels(db: Database.Database, albumId: number): AlbumLabel[] {
   return db
     .prepare<[number], AlbumLabel>(
       `SELECT ar.id AS id, ar.name AS name, abl.label_order AS "order"
@@ -31,7 +29,7 @@ export function getAlbumLabels(db: Database.Database, albumId: number): AlbumLab
 }
 
 /* 覆盖专辑全部厂牌；名称忽略大小写去重，保留用户给出的顺序。 */
-export function setAlbumLabels(db: Database.Database, albumId: number, labels: string[]): void {
+function setAlbumLabels(db: Database.Database, albumId: number, labels: string[]): void {
   const normalizedLabels: string[] = []
   const seen = new Set<string>()
   for (const source of labels) {

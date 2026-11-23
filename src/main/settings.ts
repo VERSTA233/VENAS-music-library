@@ -1,9 +1,10 @@
 import Store from 'electron-store'
-import type { NavigationSession, PlaybackSession, PlaybackVolume } from '../shared/types'
+import type { MacAudioBackend, NavigationSession, PlaybackSession, PlaybackVolume } from '../shared/types'
 
 interface AppSettings {
   playbackVolume: PlaybackVolume
   gaplessEnabled: boolean
+  macAudioBackend: MacAudioBackend
   /* 音乐目录（Append/Music 所在位置） */
   musicRoot: string | null
   /* 系统数据目录（.system 所在位置，含数据库/缓存/日志），默认与 musicRoot 相同，可分开存放 */
@@ -20,6 +21,7 @@ export const settings = new Store<AppSettings>({
   defaults: {
     playbackVolume: { volume: 1, muted: false },
     gaplessEnabled: true,
+    macAudioBackend: 'avfoundation',
     musicRoot: null,
     systemRoot: null,
     neteaseMusicRoot: null,

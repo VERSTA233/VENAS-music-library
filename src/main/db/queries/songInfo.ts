@@ -18,31 +18,31 @@ export function createSongInfoOnIngest(
   ).run(songId, addTime, firstHeardDate, score, comment)
 }
 
-/* 更新用户手动登记的初次聆听日期；song_info 记录理论上入库时已创建，这里仍用 UPSERT 兜底 */
-export function setFirstHeardDate(db: Database.Database, songId: number, firstHeardDate: string | null): void {
-  db.prepare(
-    `INSERT INTO song_info (song_id, first_heard_date) VALUES (?, ?)
-     ON CONFLICT(song_id) DO UPDATE SET first_heard_date = excluded.first_heard_date`
-  ).run(songId, firstHeardDate)
-}
-
-/* 更新用户评分与评论；song_info 记录理论上入库时已创建，这里仍用 UPSERT 兜底 */
-export function setScoreAndComment(
+/* 编辑歌曲时一次保存用户信息；不覆盖入库时间与最近播放日期。 */
+export function updateSongInfo(
   db: Database.Database,
   songId: number,
-  score: number | null,
-  comment: string | null
+  data: { firstHeardDate: string | null; score: number | null; comment: string | null }
 ): void {
   db.prepare(
-    `INSERT INTO song_info (song_id, score, comment) VALUES (?, ?, ?)
-     ON CONFLICT(song_id) DO UPDATE SET score = excluded.score, comment = excluded.comment`
-  ).run(songId, score, comment)
+    `INSERT INTO song_info (song_id, first_heard_date, score, comment) VALUES (?, ?, ?, ?)
+     ON CONFLICT(song_id) DO UPDATE SET first_heard_date = excluded.first_heard_date,
+       score = excluded.score, comment = excluded.comment`
+  ).run(songId, data.firstHeardDate, data.score, data.comment)
 }
 
-/* 播放完成或超过阈值时更新 last_heard_date；song_info 记录理论上入库时已创建，这里仍用 UPSERT 兜底 */
-export function touchLastHeard(db: Database.Database, songId: number): void {
+/* 实际累计聆听达到阈值后更新日期；返回数据库采用的本地日期，供随机权重立即同步。 */
+export function touchLastHeard(db: Database.Database, songId: number): string {
   db.prepare(
     `INSERT INTO song_info (song_id, last_heard_date) VALUES (?, DATE('now', 'localtime'))
      ON CONFLICT(song_id) DO UPDATE SET last_heard_date = DATE('now', 'localtime')`
   ).run(songId)
+  return db.prepare<[number], { last_heard_date: string }>('SELECT last_heard_date FROM song_info WHERE song_id = ?').get(songId)!.last_heard_date
+}
+
+/* 一次查询全部已有播放记录；无记录的歌曲由前端赋默认权重。 */
+export function getLastHeardDates(db: Database.Database): { songId: number; date: string }[] {
+  return db.prepare<[], { songId: number; date: string }>(
+    'SELECT song_id AS songId, last_heard_date AS date FROM song_info WHERE last_heard_date IS NOT NULL'
+  ).all()
 }

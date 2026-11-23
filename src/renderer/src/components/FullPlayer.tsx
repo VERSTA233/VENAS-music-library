@@ -6,6 +6,7 @@ import type { NavTarget } from '../stores/navStore'
 import { usePlayerStore } from '../stores/playerStore'
 import PlaybackCover from './PlaybackCover'
 import SyncedLyrics from './SyncedLyrics'
+import AudioVisualizer from './AudioVisualizer'
 import SongEditModal from './SongEditModal'
 import IngestModal from './IngestModal'
 import PlaybackControls from './PlaybackControls'
@@ -15,7 +16,7 @@ import PlaybackProgress from './PlaybackProgress'
 interface FullPlayerProps {
   open: boolean
   onClose: () => void
-  onNavigate: (target: Extract<NavTarget, { view: 'artist' | 'album' }>) => void
+  onNavigate: (target: Extract<NavTarget, { view: 'artist' | 'album' | 'tag' }>) => void
 }
 
 /* 沉浸式播放层从底部进入并沿同一路径收起，避免播放中误触拖拽。 */
@@ -41,11 +42,14 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
     }
   }, [currentTrack?.key, currentTrack?.songId])
 
-  const lyric = detail?.lyric ?? currentTrack?.appendEntry?.lyric ?? null
+  const lyric = (detail?.id === currentTrack?.songId ? detail?.lyric : null) ?? currentTrack?.appendEntry?.lyric ?? null
+  const currentTags = detail?.id === currentTrack?.songId ? detail?.tags : undefined
+  const genre = currentTags?.filter((tag) => tag.tag_type?.toLowerCase() === 'genre')
+  const mood = currentTags?.filter((tag) => tag.tag_type?.toLowerCase() === 'mood')
   const appendAlbum = currentTrack?.appendEntry?.album
   const artistText = detail?.artists.map((artist) => artist.name).join(' / ') ?? currentTrack?.artistNames ?? ''
 
-  function closeAndNavigate(target: { view: 'artist'; id: number; isLabel: boolean } | { view: 'album'; id: number }): void {
+  function closeAndNavigate(target: Parameters<FullPlayerProps['onNavigate']>[0]): void {
     onNavigate(target)
   }
 
@@ -55,86 +59,97 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
   }
 
   return (
-    <AnimatePresence>
-      {open && currentTrack && (
-        <motion.section
-          className="fixed inset-0 z-[100] flex min-h-0 flex-col overflow-hidden bg-player text-white"
-          initial={{ y: '100%', opacity: 0.7 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: '100%', opacity: 0.7 }}
-          transition={{ type: 'spring', bounce: 0, duration: 0.42 }}
-        >
-          <header className="window-drag-region relative z-10 flex h-24 shrink-0 items-center px-5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-300 transition active:scale-95 hover:bg-white/10 hover:text-white"
-              title="收起播放界面"
-              aria-label="收起播放界面"
-            >
-              <ChevronDown size={25} strokeWidth={1.8} />
-            </button>
-          </header>
+      <>
+      <AnimatePresence>
+        {open && currentTrack && (
+          <motion.section
+            className="fixed inset-0 z-[100] flex min-h-0 flex-col overflow-hidden bg-player text-white"
+            initial={{ y: '100%', opacity: 0.7 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: '100%', opacity: 0.7 }}
+            transition={{ type: 'spring', bounce: 0, duration: 0.42 }}
+          >
+            <header className="window-drag-region relative z-10 flex h-24 shrink-0 items-center px-5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-300 transition active:scale-95 hover:bg-white/10 hover:text-white"
+                title="收起播放界面"
+                aria-label="收起播放界面"
+              >
+                <ChevronDown size={25} strokeWidth={1.8} />
+              </button>
+            </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-5 md:overflow-hidden md:px-16 lg:px-24">
-            <div className="grid w-full grid-cols-1 content-start gap-y-5 md:mx-auto md:max-w-[880px] md:grid-cols-2 md:gap-x-10 md:gap-y-0">
-              <div className="order-1 min-w-0 md:-translate-x-5">
-                <PlaybackCover track={currentTrack} className="aspect-square w-full rounded-xl object-cover shadow-2xl shadow-black/40" />
-                <div className="flex min-w-0 flex-col gap-1 pt-5">
-                  <TruncatedText text={currentTrack.title} lines={2} revealDelay={1500} className="text-2xl font-semibold leading-tight" />
-                  <div className="relative top-[2px]">
-                    {detail ? (
-                      <HoverMarqueeArtistLinks artists={detail.artists} fullText={artistText} onNavigate={closeAndNavigate} />
+            <div className="full-player-content min-h-0 flex-1 overflow-y-auto px-8 pb-5 md:px-16 lg:px-24">
+              <div className="full-player-columns grid w-full grid-cols-1 content-start gap-y-5 md:mx-auto md:grid-cols-2 md:gap-x-10 md:gap-y-0">
+                <div className="order-1 min-w-0 md:-translate-x-5">
+                  <PlaybackCover track={currentTrack} className="aspect-square w-full rounded-xl object-cover shadow-2xl shadow-black/40" />
+                  <div className="flex min-w-0 flex-col gap-1 pt-5">
+                    <TruncatedText text={currentTrack.title} lines={2} revealDelay={1500} className="text-2xl font-semibold leading-tight" />
+                    <div className="relative top-[2px]">
+                      {detail ? (
+                        <HoverMarqueeArtistLinks artists={detail.artists} fullText={artistText} onNavigate={closeAndNavigate} />
+                      ) : (
+                        <HoverMarqueeText text={artistText} className="text-base leading-6 text-neutral-400" />
+                      )}
+                    </div>
+                    {detail?.album ? (
+                      <button
+                        className="w-full min-w-0 cursor-pointer text-left text-neutral-500 outline-none transition-colors duration-200 ease-out hover:text-neutral-200 focus-visible:text-white active:text-white"
+                        onClick={() => closeAndNavigate({ view: 'album', id: detail.album!.id })}
+                      >
+                        <HoverMarqueeText
+                          text={detail.album.title}
+                          className="text-sm leading-6"
+                        />
+                      </button>
+                    ) : appendAlbum ? (
+                      <HoverMarqueeText text={appendAlbum} className="text-sm leading-6 text-neutral-500" />
+                    ) : null}
+                  </div>
+                </div>
+                <aside className="relative order-2 min-h-[280px] overflow-hidden md:min-h-0 md:translate-x-5">
+                  <div className="absolute inset-0">
+                    {lyric?.trim() ? (
+                      <SyncedLyrics lyric={lyric} currentTime={currentTime} isPlaying={isPlaying} onSeek={requestSeek} />
                     ) : (
-                      <HoverMarqueeText text={artistText} className="text-base leading-6 text-neutral-400" />
+                      <AudioVisualizer trackKey={currentTrack.key} mediaUrl={currentTrack.mediaUrl} contentVersion={currentTrack.contentVersion} genre={genre} mood={mood} onOpenTag={(tag) => closeAndNavigate({ view: 'tag', id: tag.id, parentType: tag.tag_type ?? undefined })} active={open} currentTime={currentTime} duration={duration} isPlaying={isPlaying} isAdvancing={isAdvancing} onSeek={requestSeek} />
                     )}
                   </div>
-                  {detail?.album ? (
-                    <button
-                      className="w-full min-w-0 cursor-pointer text-left text-neutral-500 outline-none transition-colors duration-200 ease-out hover:text-neutral-200 focus-visible:text-white active:text-white"
-                      onClick={() => closeAndNavigate({ view: 'album', id: detail.album!.id })}
-                    >
-                      <HoverMarqueeText
-                        text={detail.album.title}
-                        className="text-sm leading-6"
-                      />
-                    </button>
-                  ) : appendAlbum ? (
-                    <HoverMarqueeText text={appendAlbum} className="text-sm leading-6 text-neutral-500" />
-                  ) : null}
-                </div>
+                </aside>
               </div>
-              <aside className="relative order-2 min-h-[280px] overflow-hidden md:min-h-0 md:translate-x-5">
-                <div className="absolute inset-0">
-                  <SyncedLyrics lyric={lyric} currentTime={currentTime} isPlaying={isPlaying} onSeek={requestSeek} />
+            </div>
+
+            <footer className="shrink-0 border-t border-white/[0.07] bg-black/15 px-5 py-4 backdrop-blur-xl md:px-10">
+              <div className="mx-auto flex max-w-5xl flex-col items-center gap-2">
+                <div className="flex items-center gap-5 sm:gap-6">
+                  <PlaybackControls variant="full" isPlaying={isPlaying} playbackMode={playbackMode} onToggleMode={() => setPlaybackMode(playbackMode === 'shuffle' ? 'sequential' : 'shuffle')} onPrevious={playPrev} onTogglePlay={togglePlay} onNext={playNext} />
+                  <button type="button" onClick={() => setPlaylistOpen((value) => !value)} className={`flex h-12 w-12 items-center justify-center rounded-full transition active:scale-95 ${playlistOpen ? 'bg-white text-black' : 'text-neutral-300 hover:bg-white/10 hover:text-white'}`} title="当前播放列表" aria-label="当前播放列表"><ListMusic size={21} /></button>
                 </div>
-              </aside>
-            </div>
-          </div>
-
-          <footer className="shrink-0 border-t border-white/[0.07] bg-black/15 px-5 py-4 backdrop-blur-xl md:px-10">
-            <div className="mx-auto flex max-w-5xl flex-col items-center gap-2">
-              <div className="flex items-center gap-5 sm:gap-6">
-                <PlaybackControls variant="full" isPlaying={isPlaying} playbackMode={playbackMode} onToggleMode={() => setPlaybackMode(playbackMode === 'shuffle' ? 'sequential' : 'shuffle')} onPrevious={playPrev} onTogglePlay={togglePlay} onNext={playNext} />
-                <button type="button" onClick={() => setPlaylistOpen((value) => !value)} className={`flex h-12 w-12 items-center justify-center rounded-full transition active:scale-95 ${playlistOpen ? 'bg-white text-black' : 'text-neutral-300 hover:bg-white/10 hover:text-white'}`} title="当前播放列表" aria-label="当前播放列表"><ListMusic size={21} /></button>
+                <PlaybackProgress
+                  currentTime={currentTime}
+                  duration={duration}
+                  isPlaying={isPlaying && isAdvancing}
+                  onSeek={requestSeek}
+                  trailing={<button type="button" onClick={openTrackDetail} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition active:scale-95 hover:bg-white/10 hover:text-white" title="歌曲信息 / 添加到音乐库" aria-label="歌曲信息 / 添加到音乐库"><MoreHorizontal size={20} /></button>}
+                />
               </div>
-              <PlaybackProgress
-                currentTime={currentTime}
-                duration={duration}
-                isPlaying={isPlaying && isAdvancing}
-                onSeek={requestSeek}
-                trailing={<button type="button" onClick={openTrackDetail} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition active:scale-95 hover:bg-white/10 hover:text-white" title="歌曲信息 / 添加到音乐库" aria-label="歌曲信息 / 添加到音乐库"><MoreHorizontal size={20} /></button>}
-              />
-            </div>
-          </footer>
+            </footer>
 
-          <QueuePanel open={playlistOpen} variant="full" queue={queue} currentIndex={currentIndex} onPlayAt={playAt} onClose={() => setPlaylistOpen(false)} />
+            <QueuePanel open={playlistOpen} variant="full" queue={queue} currentIndex={currentIndex} onPlayAt={playAt} onClose={() => setPlaylistOpen(false)} />
 
-          {editingSongId != null && <SongEditModal songId={editingSongId} onClose={() => setEditingSongId(null)} onSaved={() => setEditingSongId(null)} />}
-          {ingestingEntry && <IngestModal entry={ingestingEntry} onClose={() => setIngestingEntry(null)} onIngested={() => setIngestingEntry(null)} />}
-        </motion.section>
+            {editingSongId != null && <SongEditModal songId={editingSongId} onClose={() => setEditingSongId(null)} onSaved={() => setEditingSongId(null)} />}
+          </motion.section>
+        )}
+      </AnimatePresence>
+      {/* 入库表单独立于全屏动画层，访问详情时收起播放器也保留编辑状态。 */}
+      {ingestingEntry && (
+        <div className={open ? 'relative z-[110]' : undefined}>
+          <IngestModal entry={ingestingEntry} onClose={() => setIngestingEntry(null)} onIngested={() => setIngestingEntry(null)} onPreviewDetail={onClose} />
+        </div>
       )}
-    </AnimatePresence>
+    </>
   )
 }
 

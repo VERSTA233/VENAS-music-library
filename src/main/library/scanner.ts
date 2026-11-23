@@ -1,12 +1,23 @@
 import { readdirSync, statSync, existsSync, readFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { parseFile, type IAudioMetadata } from 'music-metadata'
+import type { IAudioMetadata } from 'music-metadata'
+import { parseAudioMetadata as parseFile } from './audioMetadata'
 import type { LibraryPaths } from './paths'
 import type { AppendEntry } from '../../shared/types'
 
-export type { AppendEntry }
-
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.ape'])
+const MAX_APPEND_METADATA_ENTRIES = 512
+const appendMetadataCache = new Map<string, { revision: string; entry: AppendEntry }>()
+
+function cacheAppendMetadata(path: string, revision: string, entry: AppendEntry): void {
+  appendMetadataCache.delete(path)
+  appendMetadataCache.set(path, { revision, entry })
+  while (appendMetadataCache.size > MAX_APPEND_METADATA_ENTRIES) {
+    const oldest = appendMetadataCache.keys().next().value as string | undefined
+    if (!oldest) break
+    appendMetadataCache.delete(oldest)
+  }
+}
 
 /* 与音频同名的 .lrc 文件（如 "X.flac" 对应 "X.lrc"），未找到则 lyric/lyricFilePath 均为 null */
 function findMatchingLyricFile(
@@ -64,23 +75,41 @@ function extractReleaseDate(meta: IAudioMetadata): string | null {
   )
 }
 
-/* 扫描 Append/ 根目录下的音频文件，解析出 mp3tag 展示信息 */
+/*
+ * 扫描 Append/ 根目录下的音频文件，解析出 mp3tag 展示信息。
+ * 按加入 Append 的时间升序排列（越新越靠后）：移动/复制进目录会刷新 ctime，与 Finder 的"添加日期"一致；
+ * mtime 与创建时间都会随文件保留原值，不能代表加入时间。同一时刻加入的按文件名排序。
+ */
 export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry[]> {
-  const entries = readdirSync(paths.append).filter((name) => {
-    const full = join(paths.append, name)
-    return statSync(full).isFile() && AUDIO_EXTENSIONS.has(extname(name).toLowerCase())
-  })
+  const entries = readdirSync(paths.append)
+    .map((name) => ({ name, stat: statSync(join(paths.append, name)) }))
+    .filter(({ name, stat }) => stat.isFile() && AUDIO_EXTENSIONS.has(extname(name).toLowerCase()))
+    .sort((a, b) => a.stat.ctimeMs - b.stat.ctimeMs || a.name.localeCompare(b.name))
+
+  const currentPaths = new Set(entries.map(({ name }) => join(paths.append, name)))
+  for (const path of appendMetadataCache.keys()) {
+    if (!currentPaths.has(path)) appendMetadataCache.delete(path)
+  }
 
   const results: AppendEntry[] = []
-  for (const fileName of entries) {
+  for (const { name: fileName, stat } of entries) {
     const full = join(paths.append, fileName)
+    const fileRevision = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
     /* 歌词文件与解析音频元数据无关，两者失败互不影响，放在 try 外单独取 */
     const { lyric, lyricFilePath } = findMatchingLyricFile(paths, fileName)
+    const cached = appendMetadataCache.get(full)
+    if (cached?.revision === fileRevision) {
+      appendMetadataCache.delete(full)
+      appendMetadataCache.set(full, cached)
+      results.push({ ...cached.entry, lyric, lyricFilePath })
+      continue
+    }
     try {
       /* OGG 的时长依赖末页采样位置，必须显式要求解析到文件末尾。 */
       const meta = await parseFile(full, { duration: true })
       results.push({
         fileName,
+        fileRevision,
         title: meta.common.title ?? fileName.replace(extname(fileName), ''),
         /* 有些标签把多位艺术家存成 TPE1 的多个值（music-metadata 会解析进 common.artists 数组），
            而 common.artist 只取第一个值，这里优先用 artists 数组拼接，避免漏掉后面的艺术家 */
@@ -99,10 +128,12 @@ export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry
         duration: meta.format.duration ? Math.round(meta.format.duration) : null,
         hasPicture: (meta.common.picture?.length ?? 0) > 0
       })
+      cacheAppendMetadata(full, fileRevision, results[results.length - 1])
     } catch {
       // 解析失败（文件损坏/格式不支持）：仍展示条目，字段留空，供用户手动处理
       results.push({
         fileName,
+        fileRevision,
         title: fileName.replace(extname(fileName), ''),
         artist: null,
         album: null,
@@ -117,6 +148,7 @@ export async function scanAppendFolder(paths: LibraryPaths): Promise<AppendEntry
         duration: null,
         hasPicture: false
       })
+      cacheAppendMetadata(full, fileRevision, results[results.length - 1])
     }
   }
   return results

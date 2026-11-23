@@ -1,17 +1,19 @@
-import { ipcMain, app, dialog, BrowserWindow } from 'electron'
+import { ipcMain, app, dialog, shell } from 'electron'
 import { rm, realpath } from 'node:fs/promises'
 import { LibraryMaintenance } from '../library/maintenance'
-import { inspectPlaybackFile } from '../library/playbackInfo'
+import { inspectPlaybackFile, inspectPlaybackFormat } from '../library/playbackInfo'
+import type { AudioOutputRuntime } from '../audioOutput'
 import { execFile } from 'node:child_process'
 import { readFileSync, existsSync, unlinkSync } from 'node:fs'
 import { basename, join, relative, isAbsolute } from 'node:path'
-import { parseFile } from 'music-metadata'
+import { parseAudioMetadata as parseFile } from '../library/audioMetadata'
 import type { LibraryPaths } from '../library/paths'
 import { settings } from '../settings'
 import { getDatabase, closeDatabase, openDatabase } from '../db'
 import { scanAppendFolder, getAppendCover } from '../library/scanner'
 import { parseArtists, mergeParsedArtists } from '../library/artistParser'
-import { ingestSong, type IngestRequest } from '../library/ingest'
+import { ingestSong } from '../library/ingest'
+import type { IngestRequest } from '../../shared/types'
 import { reloadAudioFile, reloadEmbeddedCover, setManualCover } from '../library/reload'
 import { moveSongPictureToAlbum, updateSongCover, writeAlbumPicture, writeArtistPicture } from '../library/coverCache'
 import {
@@ -24,10 +26,17 @@ import {
 } from '../library/health'
 import { deleteLibrarySong } from '../library/deleteSong'
 import { cleanEmptyLibraryRecords } from '../library/healthCleanup'
+import { createArtistSelectionResolver } from '../library/artistSelection'
 import { copyAndVerifySystemDirectory } from '../library/systemMigration'
 import { recordMigratedAppendSource } from '../library/migratedAppendSources'
 import { importNeteaseMusic } from '../library/neteaseImport'
+import { PlaylistExporter } from '../library/playlistExport'
+import { AudioTagWriter } from '../library/audioTagWriteback'
+import { AudioIntegrityScanner, clearAudioIntegrityScanState } from '../library/audioIntegrity'
+import { audioFileOperations } from '../library/audioFileOperations'
+import { affectedCovers } from '../library/coverUpdates'
 import { deleteLibraryArtist, mergeLibraryArtist } from '../library/artistMaintenance'
+import { broadcastToWindows } from '../windowBroadcast'
 import {
   addAlbumOrphanCandidates,
   addSongOrphanCandidates,
@@ -38,7 +47,6 @@ import {
 } from '../library/orphanCleanup'
 import {
   listSongs,
-  countSongs,
   getSongDetail,
   setSongArtists,
   setSongTags,
@@ -47,7 +55,6 @@ import {
   type SongArtistInput
 } from '../db/queries/songs'
 import {
-  findOrCreateArtist,
   findArtistByName,
   findLabelByName,
   searchArtists,
@@ -59,6 +66,7 @@ import {
   getArtistSongs,
   getArtistCoverCandidates,
   setArtistAlias,
+  previewArtistAlias,
   updateArtistInfo
 } from '../db/queries/artists'
 import {
@@ -85,24 +93,50 @@ import {
   removeSongFromTag,
   setSongTagComment,
   setTagSongOrder,
-  updateTagType,
   updateTag,
   deleteTag
 } from '../db/queries/tags'
 import { listLabels, getLabelById, getLabelAlbumGroups } from '../db/queries/labels'
-import { touchLastHeard, setFirstHeardDate, setScoreAndComment } from '../db/queries/songInfo'
-import type { SongUpdateData, ArtistAliasType, ArtistUpdateData, AlbumUpdateData, PlaybackSession, NavigationSession, SongListSort, SortDirection, MusicRootInspection, TagUpdateData } from '../../shared/types'
+import { touchLastHeard, getLastHeardDates, updateSongInfo } from '../db/queries/songInfo'
+import type { SongUpdateData, ArtistAliasType, ArtistUpdateData, AlbumUpdateData, PlaybackSession, NavigationSession, SongListSort, SortDirection, MusicRootInspection, TagUpdateData, AudioOutputSettings } from '../../shared/types'
 
 /* 注册全部 IPC handler，供 preload 暴露给渲染进程调用 */
-export function registerIpcHandlers(paths: LibraryPaths): void {
-  const maintenance = new LibraryMaintenance((state) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.webContents.isDestroyed()) window.webContents.send('library:maintenance', state)
-    }
-  })
-  const handle: typeof ipcMain.handle = (channel, listener) => {
-    ipcMain.handle(channel, (event, ...args) => maintenance.run(() => listener(event, ...args)))
+export function registerIpcHandlers(paths: LibraryPaths, audioOutputRuntime: AudioOutputRuntime): void {
+  const notifyCoverUpdate = (target: Parameters<typeof affectedCovers>[1]): void => {
+    const update = affectedCovers(getDatabase(), target)
+    broadcastToWindows('library:coverUpdated', update)
   }
+  const playlistExporter = new PlaylistExporter(paths)
+  const maintenance = new LibraryMaintenance((state) => broadcastToWindows('library:maintenance', state))
+  const handle: typeof ipcMain.handle = (channel, listener) => {
+    ipcMain.handle(channel, (event, ...args) => maintenance.run(() =>
+      channel === 'songs:update' || channel === 'songs:delete'
+        ? audioFileOperations.run(() => listener(event, ...args))
+        : listener(event, ...args)))
+  }
+  const tagWriter = new AudioTagWriter(paths, getDatabase, join(__dirname, 'audioTagWorker.js'),
+    join(app.isPackaged ? process.resourcesPath : app.getAppPath() + '/resources', 'audio-tags', process.platform === 'win32' ? 'venas-tag-writer.exe' : 'venas-tag-writer'),
+    progress => broadcastToWindows('library:audioTagProgress', progress),
+    operation => maintenance.run(operation))
+  ipcMain.handle('library:getAudioTagProgress', () => tagWriter.progress)
+  handle('library:startAudioTagWrite', () => tagWriter.start())
+  ipcMain.handle('library:cancelAudioTagWrite', () => tagWriter.cancel())
+  const integrityScanner = new AudioIntegrityScanner(paths, getDatabase,
+    join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'audio-inspect', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+    progress => broadcastToWindows('library:audioIntegrityProgress', progress),
+    operation => maintenance.run(operation))
+  // 编码检查结果不跨应用进程保留；问题文件也不会在同一进程的后续扫描中被缓存跳过。
+  clearAudioIntegrityScanState(getDatabase())
+  handle('library:getAudioIntegrityProgress', () => integrityScanner.progress)
+  handle('library:startAudioIntegrityScan', () => integrityScanner.start())
+  ipcMain.handle('library:cancelAudioIntegrityScan', () => integrityScanner.cancel())
+  app.on('before-quit', event => {
+    if (!tagWriter.running && !integrityScanner.running) return
+    event.preventDefault()
+    tagWriter.cancel()
+    integrityScanner.cancel()
+    void Promise.allSettled([tagWriter.completion, integrityScanner.completion]).then(() => app.quit())
+  })
   ipcMain.handle('library:getMaintenanceState', () => maintenance.state)
   let choosingSystemRoot = false
 
@@ -147,24 +181,25 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   /* ---- Songs (Music library) ---- */
   handle('songs:list', (_e, sort: SongListSort = 'library', query = '', direction: SortDirection = 'desc') => {
     const db = getDatabase()
-    return { items: listSongs(db, sort, query, direction), total: countSongs(db, query) }
+    const items = listSongs(db, sort, query, direction)
+    return { items, total: items.length }
   })
   handle('songs:detail', (_e, songId: number) => getSongDetail(getDatabase(), songId))
   handle('songs:delete', (_e, songId: number) => deleteLibrarySong(paths, getDatabase(), songId))
   handle('songs:update', async (_e, songId: number, data: SongUpdateData) => {
     const db = getDatabase()
-    const hadAlbum = getSongAlbum(db, songId) != null
+    const previousAlbumId = getSongAlbum(db, songId)?.id ?? null
     const orphanCandidates = createOrphanCandidates()
     addSongOrphanCandidates(db, orphanCandidates, songId)
     if (data.album?.albumId != null) addAlbumOrphanCandidates(db, orphanCandidates, data.album.albumId)
     let cleanupResult: OrphanCleanupResult = { albumIds: [], artistIds: [] }
 
     const updateMetadata = (): void => {
+      const resolveArtist = createArtistSelectionResolver(db)
       updateSongFields(db, songId, { title: data.title, lyric: data.lyric })
-      setFirstHeardDate(db, songId, data.firstHeardDate)
-      setScoreAndComment(db, songId, data.score, data.comment)
+      updateSongInfo(db, songId, data)
       const artistInputs: SongArtistInput[] = data.artists.filter((a) => a.name.trim()).map((a, order) => ({
-        artistId: findOrCreateArtist(db, a.name.trim(), a.type),
+        artistId: resolveArtist(a),
         role: a.role,
         order
       }))
@@ -191,7 +226,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
         setSongAlbum(db, songId, albumId, data.album.discNumber, data.album.trackNumber)
         // 用户已确认应用专辑信息时，专辑艺术家同样按当前表单完整覆盖；空列表表示明确清空关联。
         const albumArtistInputs: AlbumArtistInput[] = data.album.artists.filter((a) => a.name.trim()).map((a, order) => ({
-          artistId: findOrCreateArtist(db, a.name.trim(), a.type),
+          artistId: resolveArtist(a),
           order
         }))
         setAlbumArtists(db, albumId, albumArtistInputs)
@@ -206,10 +241,12 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     removeOrphanPictures(paths, cleanupResult)
 
     // 原本无专辑、这次新加入某张专辑：把它的独立封面迁移为该专辑的封面（专辑已有封面则丢弃这份）
-    if (!hadAlbum && data.album?.title.trim()) {
+    if (previousAlbumId === null && data.album?.title.trim()) {
       const album = getSongAlbum(db, songId)
       if (album) moveSongPictureToAlbum(paths, songId, album.id)
     }
+    const nextAlbumId = getSongAlbum(db, songId)?.id ?? null
+    if (audioResult.audioReplaced || previousAlbumId !== nextAlbumId) notifyCoverUpdate({ songId })
 
     /* 编辑时从外部导入的歌词在数据库更新完成后不再需要；清空关联时 lyricFilePath 为 null，不删除源文件。 */
     if (data.lyricFilePath) {
@@ -232,11 +269,15 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     const filePath = result.filePaths[0]
     return { filePath, fileName: basename(filePath) }
   })
-  handle('songs:setManualCover', (_e, songId: number, imageData: Uint8Array) =>
+  handle('songs:setManualCover', async (_e, songId: number, imageData: Uint8Array) => {
     /* 渲染进程传来的是 Uint8Array，这里统一转成 Buffer 供 sharp 处理 */
-    setManualCover(paths, songId, Buffer.from(imageData))
-  )
-  handle('songs:reloadEmbeddedCover', (_e, songId: number) => reloadEmbeddedCover(paths, songId))
+    await setManualCover(paths, songId, Buffer.from(imageData))
+    notifyCoverUpdate({ songId })
+  })
+  handle('songs:reloadEmbeddedCover', async (_e, songId: number) => {
+    await reloadEmbeddedCover(paths, songId)
+    notifyCoverUpdate({ songId })
+  })
   handle('songs:cover', (_e, songId: number) => {
     // 歌曲属于专辑则封面是专辑封面，否则是歌曲独立封面，两套目录二选一读取
     const db = getDatabase()
@@ -265,6 +306,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
       if (!existsSync(cachePath)) {
         try {
           await updateSongCover(paths, db, songId, imageData)
+          notifyCoverUpdate({ songId })
         } catch {
           // 缓存压缩或写入失败不应阻塞当前播放，仍返回刚从源文件取得的封面。
         }
@@ -279,8 +321,7 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   /* ---- Artists ---- */
   handle('artists:search', (_e, query: string) => searchArtists(getDatabase(), query))
   handle('artists:searchLabels', (_e, query: string) => searchLabels(getDatabase(), query))
-  /* 精确匹配（忽略大小写）：供艺术家编辑器判断某个名字入库时是"关联已有"还是"新建"，用于绿/红指示 */
-  handle('artists:matchExact', (_e, name: string) => findArtistByName(getDatabase(), name) !== null)
+  handle('artists:findExact', (_e, name: string) => findArtistByName(getDatabase(), name))
   handle('artists:matchLabelExact', (_e, name: string) => findLabelByName(getDatabase(), name) !== null)
   handle('artists:list', () => listArtists(getDatabase()))
   handle('artists:detail', (_e, artistId: number) => {
@@ -308,9 +349,10 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
 
     return null
   })
-  handle('artists:setManualPicture', (_e, artistId: number, imageData: Uint8Array) =>
-    writeArtistPicture(paths, artistId, Buffer.from(imageData))
-  )
+  handle('artists:setManualPicture', async (_e, artistId: number, imageData: Uint8Array) => {
+    await writeArtistPicture(paths, artistId, Buffer.from(imageData))
+    notifyCoverUpdate({ artistId })
+  })
   handle('artists:update', (_e, artistId: number, data: ArtistUpdateData) =>
     updateArtistInfo(getDatabase(), artistId, data.name, data.type, data.country, data.memberIds ?? [])
   )
@@ -320,8 +362,18 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   handle('artists:merge', (_e, sourceArtistId: number, targetArtistId: number) =>
     mergeLibraryArtist(paths, getDatabase(), sourceArtistId, targetArtistId)
   )
-  handle('artists:setAlias', (_e, aliasArtistId: number, canonicalArtistId: number, aliasType: ArtistAliasType) =>
-    setArtistAlias(getDatabase(), aliasArtistId, canonicalArtistId, aliasType)
+  handle('artists:setAlias', (_e, aliasArtistId: number, canonicalArtistId: number | null, aliasType: ArtistAliasType) => {
+    const db = getDatabase()
+    const previousCanonicalId = getArtistAliasOf(db, aliasArtistId)?.id
+    setArtistAlias(db, aliasArtistId, canonicalArtistId, aliasType)
+    /* 别名归属会改变主艺名的兜底封面候选，刷新旧、新主艺名及当前艺术家。 */
+    const nextCanonicalId = getArtistAliasOf(db, aliasArtistId)?.id
+    for (const artistId of new Set([aliasArtistId, previousCanonicalId, nextCanonicalId])) {
+      if (artistId != null) notifyCoverUpdate({ artistId })
+    }
+  })
+  handle('artists:previewAlias', (_e, aliasArtistId: number, canonicalArtistId: number, aliasType: ArtistAliasType) =>
+    previewArtistAlias(getDatabase(), aliasArtistId, canonicalArtistId, aliasType)
   )
   handle('artists:listLabels', () => listLabels(getDatabase()))
   handle('artists:labelDetail', (_e, labelId: number) => {
@@ -340,11 +392,12 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     addAlbumOrphanCandidates(db, orphanCandidates, albumId)
     let cleanupResult: OrphanCleanupResult = { albumIds: [], artistIds: [] }
     db.transaction(() => {
+      const resolveArtist = createArtistSelectionResolver(db)
       updateAlbumFields(db, albumId, data)
       const albumArtistInputs: AlbumArtistInput[] = data.artists
         .filter((artist) => artist.name.trim())
         .map((artist, order) => ({
-          artistId: findOrCreateArtist(db, artist.name.trim(), artist.type),
+          artistId: resolveArtist(artist),
           order
         }))
       setAlbumArtists(db, albumId, albumArtistInputs)
@@ -352,9 +405,10 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     })()
     removeOrphanPictures(paths, cleanupResult)
   })
-  handle('albums:setManualCover', (_e, albumId: number, imageData: Uint8Array) =>
-    writeAlbumPicture(paths, albumId, Buffer.from(imageData))
-  )
+  handle('albums:setManualCover', async (_e, albumId: number, imageData: Uint8Array) => {
+    await writeAlbumPicture(paths, albumId, Buffer.from(imageData))
+    notifyCoverUpdate({ albumId })
+  })
   handle('albums:detail', (_e, albumId: number) => {
     const db = getDatabase()
     const album = getAlbumById(db, albumId)
@@ -386,27 +440,39 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   handle('tags:setSongOrder', (_e, tagId: number, songIds: number[]) =>
     setTagSongOrder(getDatabase(), tagId, songIds)
   )
-  handle('tags:updateType', (_e, tagId: number, tagType: string | null) =>
-    updateTagType(getDatabase(), tagId, tagType)
-  )
   handle('tags:update', (_e, tagId: number, data: TagUpdateData) =>
     updateTag(getDatabase(), tagId, data.name, data.tagType)
   )
   handle('tags:delete', (_e, tagId: number) => deleteTag(getDatabase(), tagId))
 
   /* ---- Playback ---- */
+  const audioOutputSettings = (): AudioOutputSettings => ({
+    supported: process.platform === 'darwin',
+    selectedBackend: settings.get('macAudioBackend') === 'auhal' ? 'auhal' : 'avfoundation',
+    ...audioOutputRuntime
+  })
+  handle('playback:getAudioOutput', () => audioOutputSettings())
+  handle('playback:setAudioOutput', (_e, backend: unknown) => {
+    if (process.platform !== 'darwin') throw new Error('此音频输出选项仅适用于 macOS')
+    if (backend !== 'auhal' && backend !== 'avfoundation') throw new Error('音频输出后端无效')
+    settings.set('macAudioBackend', backend)
+    // Chromium 启动参数只能在启动前设置；保存偏好不会改变本次进程的运行后端。
+    return audioOutputSettings()
+  })
   handle('playback:getVolume', () => settings.get('playbackVolume'))
   handle('playback:setVolume', (_e, value: { volume: number; muted: boolean }) => {
     if (!value || !Number.isFinite(value.volume) || value.volume < 0 || value.volume > 1 || typeof value.muted !== 'boolean') throw new Error('音量设置无效')
     settings.set('playbackVolume', { volume: value.volume, muted: value.muted })
   })
   handle('playback:inspectFile', (_e, mediaUrl: string) => inspectPlaybackFile(paths, mediaUrl))
+  handle('playback:formatInfo', (_e, mediaUrl: string) => inspectPlaybackFormat(paths, mediaUrl))
   handle('playback:getGapless', () => settings.get('gaplessEnabled'))
   handle('playback:setGapless', (_e, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('无缝播放设置无效')
     settings.set('gaplessEnabled', enabled)
   })
   handle('playback:touchLastHeard', (_e, songId: number) => touchLastHeard(getDatabase(), songId))
+  handle('playback:lastHeardDates', () => getLastHeardDates(getDatabase()))
   handle('playback:getSession', () => settings.get('playbackSession'))
   handle('playback:saveSession', (_e, session: PlaybackSession | null) => settings.set('playbackSession', session))
 
@@ -421,6 +487,13 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
     neteaseMusicRoot: settings.get('neteaseMusicRoot')
   }))
   handle('library:checkMissingAudio', () => findMissingAudioFiles(paths, getDatabase()))
+  handle('library:inspectPlaylistExport', () => playlistExporter.inspect(getDatabase()))
+  handle('library:generatePlaylists', (_e, token: string, skipMissing: boolean) => playlistExporter.generate(token, skipMissing === true))
+  handle('library:cancelPlaylistExport', (_e, token: string) => playlistExporter.cancel(token))
+  handle('library:openPlaylistFolder', async () => {
+    const error = await shell.openPath(join(paths.music, 'Playlist'))
+    if (error) throw new Error(error)
+  })
   handle('library:checkMissingCovers', () => repairMissingSongCovers(paths, getDatabase()))
   handle('library:checkOrphanPictures', () => findOrphanPictureFiles(paths, getDatabase()))
   handle('library:checkAlbumsWithoutSongs', () => findAlbumsWithoutSongs(getDatabase()))
@@ -457,6 +530,8 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
   })
 
   handle('library:confirmMusicRootChange', (_e, musicRoot: string) => {
+    if (integrityScanner.running) throw new Error('请先停止编码检查，再更换音乐目录')
+    if (tagWriter.running) throw new Error('请先停止标签写入，再更换音乐目录')
     /* 目录选择后的确认步骤只修改配置并重启，绝不复制、移动或删除任何音频文件。 */
     if (!musicRoot || !existsSync(musicRoot)) throw new Error('目标音乐目录不存在')
     settings.set('musicRoot', musicRoot)
@@ -478,6 +553,8 @@ export function registerIpcHandlers(paths: LibraryPaths): void {
 
   /* 迁移本身不进入普通请求队列，避免等待自身；重复迁移直接拒绝。 */
   ipcMain.handle('library:changeSystemRoot', async () => {
+    if (integrityScanner.running) throw new Error('请先停止编码检查，再迁移系统目录')
+    if (tagWriter.running) throw new Error('请先停止标签写入，再迁移系统目录')
     if (choosingSystemRoot || maintenance.state) throw new Error('系统目录正在迁移，请等待完成')
     choosingSystemRoot = true
     try {

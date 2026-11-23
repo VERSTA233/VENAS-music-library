@@ -4,8 +4,6 @@ import { buildSearchTerms } from '../../../shared/searchTerms'
 import { getSongAlbum } from './albums'
 import { withArtistNames } from './songList'
 
-export type { SongListItem, SongDetail }
-
 export interface SongArtistInput {
   artistId: number
   role: string
@@ -32,12 +30,6 @@ export function listSongs(db: Database.Database, sort: SongListSort = 'library',
   ).all(search.parameters) as { id: number; title: string; length: number | null; file_name: string; add_time: string | null }[]
 
   return withArtistNames(db, rows)
-}
-
-export function countSongs(db: Database.Database, query = ''): number {
-  const search = buildSongSearch(query)
-  const row = db.prepare(`SELECT COUNT(*) AS count FROM songs s WHERE ${search.where}`).get(search.parameters) as { count: number } | undefined
-  return row?.count ?? 0
 }
 
 /* 关键词同时匹配曲名、歌曲艺术家、专辑名、厂牌；罗马字额外转换为平假名和片假名后参与同一查询。 */

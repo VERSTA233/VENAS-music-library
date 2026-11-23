@@ -1,12 +1,15 @@
 import { UserPlus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ArtistRow } from '../../../shared/types'
+import { useNavStore } from '../stores/navStore'
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer'
 
 interface ArtistMemberPickerProps {
   ownerId: number
   members: ArtistRow[]
   onChange: (members: ArtistRow[]) => void
   disabled?: boolean
+  onNavigate?: (member: ArtistRow) => void
 }
 
 /* Group/Label 成员只关联数据库中已有的非厂牌艺术家，不在这里隐式创建新记录。 */
@@ -14,7 +17,8 @@ export default function ArtistMemberPicker({
   ownerId,
   members,
   onChange,
-  disabled = false
+  disabled = false,
+  onNavigate
 }: ArtistMemberPickerProps): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState<ArtistRow[]>([])
@@ -42,14 +46,7 @@ export default function ArtistMemberPicker({
     })
   }, [members, ownerId, query])
 
-  useEffect(() => {
-    if (!open) return
-    function closeOnOutsidePointer(event: PointerEvent): void {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
-  }, [open])
+  useDismissibleLayer(open, [rootRef], () => setOpen(false))
 
   function addMember(member: ArtistRow): void {
     if (member.id === ownerId || members.some((current) => current.id === member.id)) return
@@ -106,7 +103,13 @@ export default function ArtistMemberPicker({
         <div className="mt-2 flex flex-wrap gap-1.5">
           {members.map((member) => (
             <span key={member.id} className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-white/[0.08] py-1 pl-2 pr-1 text-xs text-neutral-200">
-              <span className="max-w-52 truncate">{member.name}</span>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onNavigate ? onNavigate(member) : useNavStore.getState().navigate({ view: 'artist', id: member.id, isLabel: member.type === 'Label' })}
+                className="max-w-52 truncate rounded px-1 py-1 text-left transition hover:text-white disabled:opacity-30"
+                title={`查看艺术家 ${member.name}`}
+              >{member.name}</button>
               <button
                 type="button"
                 onClick={() => removeMember(member.id)}

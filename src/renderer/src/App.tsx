@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Disc3, FolderInput, LibraryBig, Music2, Settings, Tags, UsersRound } from 'lucide-react'
+import { Disc3, FolderInput, LibraryBig, Music2, ScanSearch, Settings, Tags, UsersRound, Wrench } from 'lucide-react'
 import type { LibraryMaintenanceState, PlaybackSession } from '../../shared/types'
 import AppendView from './views/AppendView'
 import MusicView from './views/MusicView'
@@ -7,12 +7,15 @@ import ArtistView from './views/ArtistView'
 import AlbumView from './views/AlbumView'
 import TagView from './views/TagView'
 import SettingsView from './views/SettingsView'
+import ToolsView from './views/ToolsView'
+import InspectView from './views/InspectView'
 import BottomPlayerBar from './components/BottomPlayerBar'
 import AudioEngine from './playback/AudioEngine'
 import FullPlayer from './components/FullPlayer'
 import { usePlayerStore } from './stores/playerStore'
 import { useNavStore, type NavTarget, type ViewKey } from './stores/navStore'
 import { useLibraryStore } from './stores/libraryStore'
+import { dispatchCoverUpdate } from './coverUpdates'
 
 /*
  * 正在输入时（文本框/文本域/可编辑元素聚焦）不拦截空格，避免打字打出空格时被误判为播放/暂停快捷键。
@@ -42,6 +45,9 @@ export default function App(): React.JSX.Element {
   const togglePlay = usePlayerStore((s) => s.togglePlay)
   const navTarget = useNavStore((s) => s.target)
   const restoreSignal = useNavStore((s) => s.restoreSignal)
+  const returnTo = useNavStore((s) => s.returnTo)
+
+  useEffect(() => window.api.library.onCoverUpdated(dispatchCoverUpdate), [])
 
   useEffect(() => {
     let disposed = false
@@ -92,7 +98,9 @@ export default function App(): React.JSX.Element {
         currentIndex: state.currentIndex,
         currentTime: state.currentTime,
         playbackMode: state.playbackMode,
-        shuffleOrder: state.shuffleOrder
+        shuffleOrder: state.shuffleOrder,
+        nextShuffleOrder: state.nextShuffleOrder,
+        previousShuffleOrder: state.previousShuffleOrder
       }
     }
 
@@ -106,7 +114,7 @@ export default function App(): React.JSX.Element {
     }
 
     const unsubscribe = usePlayerStore.subscribe((state, previous) => {
-      if (state.queue === previous.queue && state.currentIndex === previous.currentIndex && state.currentTime === previous.currentTime && state.playbackMode === previous.playbackMode && state.shuffleOrder === previous.shuffleOrder) return
+      if (state.queue === previous.queue && state.currentIndex === previous.currentIndex && state.currentTime === previous.currentTime && state.playbackMode === previous.playbackMode && state.shuffleOrder === previous.shuffleOrder && state.nextShuffleOrder === previous.nextShuffleOrder && state.previousShuffleOrder === previous.previousShuffleOrder) return
       if (!restored) {
         if (!applyingRestore) changedBeforeRestore = true
         return
@@ -143,7 +151,7 @@ export default function App(): React.JSX.Element {
     setView(navTarget.view === 'tagType' ? 'tag' : navTarget.view)
   }, [navTarget])
 
-  /* 详情页返回按钮触发跨视图返回时，把顶层视图切回记录的目标视图（目前只有 Music） */
+  /* 详情页返回按钮触发跨视图返回时，切回入口视图。 */
   useEffect(() => {
     if (!restoreSignal) return
     setView(restoreSignal.view)
@@ -166,7 +174,7 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [togglePlay, fullPlayerOpen, maintenance])
 
-  function handleFullPlayerNavigate(target: Extract<NavTarget, { view: 'artist' | 'album' }>): void {
+  function handleFullPlayerNavigate(target: Extract<NavTarget, { view: 'artist' | 'album' | 'tag' }>): void {
     setView(target.view)
     useNavStore.getState().navigate(target)
     setFullPlayerOpen(false)
@@ -204,17 +212,25 @@ export default function App(): React.JSX.Element {
             </SidebarSection>
 
             <div className="mt-auto border-t border-white/[0.08] pt-4">
-              <NavItem label="设置" icon={<Settings size={17} />} active={view === 'settings'} onClick={() => handleSidebarNavigation('settings')} />
+              <NavItem label="Tools" icon={<Wrench size={17} />} active={view === 'tools'} onClick={() => handleSidebarNavigation('tools')} />
+              <NavItem label="Inspect" icon={<ScanSearch size={17} />} active={view === 'inspect'} onClick={() => handleSidebarNavigation('inspect')} />
+              <NavItem label="Settings" icon={<Settings size={17} />} active={view === 'settings'} onClick={() => handleSidebarNavigation('settings')} />
             </div>
           </aside>
 
           <main className="min-w-0 flex-1 bg-content">
-            {view === 'append' && <AppendView key={`append-${viewEpoch}`} />}
+            {(view === 'append' || returnTo?.view === 'append' || restoreSignal?.view === 'append') && (
+              <div key={`append-${viewEpoch}`} className={view === 'append' ? 'h-full' : 'hidden'}>
+                <AppendView active={view === 'append'} />
+              </div>
+            )}
             {view === 'music' && <MusicView key={`music-${viewEpoch}`} />}
             {view === 'artist' && <ArtistView key={`artist-${viewEpoch}`} />}
             {view === 'album' && <AlbumView key={`album-${viewEpoch}`} />}
             {view === 'tag' && <TagView key={`tag-${viewEpoch}`} />}
             {view === 'settings' && <SettingsView key={`settings-${viewEpoch}`} />}
+            {view === 'tools' && <ToolsView key={`tools-${viewEpoch}`} />}
+            {view === 'inspect' && <InspectView key={`inspect-${viewEpoch}`} />}
           </main>
         </div>
 

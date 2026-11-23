@@ -9,6 +9,7 @@ interface BrowseToolbarActionsProps {
   sortControl?: ReactNode
   count: number
   countUnit: string
+  children?: ReactNode
 }
 
 /* 分类第一层视图共用的搜索与数量展示；需要排序的视图可额外传入排序控件。 */
@@ -19,7 +20,8 @@ export default function BrowseToolbarActions({
   searchLabel,
   sortControl,
   count,
-  countUnit
+  countUnit,
+  children
 }: BrowseToolbarActionsProps): React.JSX.Element {
   return (
     <div className="ml-auto flex min-w-0 items-center gap-3">
@@ -46,6 +48,7 @@ export default function BrowseToolbarActions({
       </label>
       {sortControl ?? null}
       <span className="shrink-0 text-xs tabular-nums text-neutral-500">{count} {countUnit}</span>
+      {children}
     </div>
   )
 }

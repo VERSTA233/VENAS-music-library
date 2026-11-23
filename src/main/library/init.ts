@@ -10,13 +10,9 @@ function ensureDirectories(paths: LibraryPaths): void {
     paths.music,
     paths.system,
     paths.tools,
-    paths.cacheAudio,
-    paths.cacheWaveforms,
     paths.assetsArtistPictures,
     paths.assetsSongPictures,
-    paths.assetsAlbumPictures,
-    paths.assetsUi,
-    paths.logs
+    paths.assetsAlbumPictures
   ]
   for (const dir of dirs) {
     mkdirSync(dir, { recursive: true })

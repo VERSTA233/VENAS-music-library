@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Pencil } from 'lucide-react'
 import type { TagTypeItem, TagListItem, TagRow, TagSongItem } from '../../../shared/types'
-import { usePlayerStore } from '../stores/playerStore'
+import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
 import SongListToolbarActions from '../components/SongListToolbarActions'
@@ -11,6 +11,7 @@ import { useNavStore } from '../stores/navStore'
 import { filterSongs } from '../songSearch'
 import TagEditModal from '../components/TagEditModal'
 import BrowseToolbarActions from '../components/BrowseToolbarActions'
+import { orderTagsForDisplay } from '../../../shared/tagOrdering'
 
 /*
  * Tag 分类导航三层结构：
@@ -199,6 +200,8 @@ function TagTypeDetail({ tagType, onBack, onSelectTag, onTypeCountChanged }: Tag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagType])
 
+  const visibleTags = useMemo(() => orderTagsForDisplay(tags, tagType), [tags, tagType])
+
   async function handleCreate(): Promise<void> {
     const name = newTagName.trim()
     if (!name) return
@@ -254,7 +257,7 @@ function TagTypeDetail({ tagType, onBack, onSelectTag, onTypeCountChanged }: Tag
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该分类下暂无 Tag</div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {tags.map((tag) => (
+              {visibleTags.map((tag) => (
               <button
                 key={tag.id}
                 onClick={() => onSelectTag(tag.id)}
@@ -290,7 +293,7 @@ function TagDetail({ tagId, onBack, onTagTypeChanged, onDeleted }: TagDetailProp
   const [savingOrder, setSavingOrder] = useState(false)
   const [editingTag, setEditingTag] = useState(false)
   const songsRef = useRef(songs)
-  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
+  const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
 
   function load(): void {
     window.api.tags.detail(tagId).then((detail) => {
@@ -308,7 +311,6 @@ function TagDetail({ tagId, onBack, onTagTypeChanged, onDeleted }: TagDetailProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagId])
 
-  const currentSongId = currentIndex !== null ? queue[currentIndex]?.songId ?? null : null
   const filteredSongs = useMemo(
     () => filterSongs(songs, query, [tag?.name ?? '', tag?.tag_type ?? '']),
     [query, songs, tag?.name, tag?.tag_type]

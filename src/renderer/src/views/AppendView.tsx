@@ -1,27 +1,29 @@
 import { useEffect, useState } from 'react'
-import { CirclePlus, FileOutput, Inbox, RefreshCw, TriangleAlert, X } from 'lucide-react'
+import { CirclePlus, FileOutput, ImageOff, Inbox, RefreshCw, TriangleAlert, X } from 'lucide-react'
 import type { AppendEntry, NeteaseImportResult } from '../../../shared/types'
 import IngestModal from '../components/IngestModal'
 import Cover from '../components/Cover'
-import { usePlayerStore, type PlayerTrack } from '../stores/playerStore'
+import type { PlayerTrack } from '../stores/playerStore'
+import { useListPlayback } from '../hooks/useListPlayback'
 import RandomPlayButton from '../components/RandomPlayButton'
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return '--:--'
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-}
+import { useNavStore } from '../stores/navStore'
+import { formatTime } from '../playbackHelpers'
 
 /* Append 缓冲区看板：实时读取 Append/ 目录（不走数据库），手动刷新，点击"添加到音乐库"进入入库表单 */
-export default function AppendView(): React.JSX.Element {
+export default function AppendView({ active = true }: { active?: boolean }): React.JSX.Element {
   const [entries, setEntries] = useState<AppendEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [ingestingEntry, setIngestingEntry] = useState<AppendEntry | null>(null)
   const [importingNetease, setImportingNetease] = useState(false)
   const [neteaseResult, setNeteaseResult] = useState<NeteaseImportResult | null>(null)
   const [neteaseError, setNeteaseError] = useState<string | null>(null)
-  const { queue, currentIndex, playQueue, playRandomQueue } = usePlayerStore()
+  const { currentKey, hasTrack, playQueue, playRandomQueue } = useListPlayback()
+  const { restoreSignal, clearRestoreSignal } = useNavStore()
+
+  /* 访问艺术家或专辑期间保持组件与入库表单挂载；恢复到 Append 后再消费返回信号。 */
+  useEffect(() => {
+    if (active && restoreSignal?.view === 'append') clearRestoreSignal()
+  }, [active, restoreSignal, clearRestoreSignal])
 
   /* Append 试听队列与曲目对应关系用 fileName 作为 key，与 Music 队列（key 前缀 music-）区分开，避免误判为同一首在播放 */
   function toTrack(entry: AppendEntry): PlayerTrack {
@@ -35,7 +37,6 @@ export default function AppendView(): React.JSX.Element {
     }
   }
 
-  const currentKey = currentIndex !== null ? queue[currentIndex]?.key ?? null : null
 
   async function refresh(): Promise<void> {
     setLoading(true)
@@ -107,13 +108,14 @@ export default function AppendView(): React.JSX.Element {
                 event.preventDefault()
                 playQueue(entries.map(toTrack), index)
               }}
-            className={`library-row group flex min-h-16 items-center gap-3 rounded-xl px-3 py-2.5 cursor-default hover:bg-white/[0.06] ${
+              className={`library-row group flex min-h-16 items-center gap-3 rounded-xl px-3 py-2.5 cursor-default hover:bg-white/[0.06] ${
                 currentKey === `append-${entry.fileName}` ? 'bg-white/[0.11] ring-1 ring-white/[0.06]' : ''
               }`}
             >
               <span className="w-7 shrink-0 text-center text-sm font-mono leading-none tabular-nums text-neutral-500">{index + 1}</span>
               <Cover
                 cacheKey={entry.fileName}
+                thumbnailKey={`append:${entry.fileName}:${entry.fileRevision ?? ''}`}
                 load={() => window.api.append.cover(entry.fileName)}
                 className="h-10 w-10 shrink-0 rounded-lg object-cover shadow-sm"
               />
@@ -121,7 +123,7 @@ export default function AppendView(): React.JSX.Element {
                 <div className="truncate text-sm font-medium text-neutral-100">{entry.title}</div>
                 <div className="truncate text-xs text-neutral-500">{entry.artist || '未知艺术家'}</div>
               </div>
-              <span className="w-12 shrink-0 text-right text-sm font-mono leading-none tabular-nums text-neutral-500">{formatDuration(entry.duration)}</span>
+              <span className="w-12 shrink-0 text-right text-sm font-mono leading-none tabular-nums text-neutral-500">{formatTime(entry.duration)}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -149,8 +151,8 @@ export default function AppendView(): React.JSX.Element {
         />
       )}
       {neteaseResult && (
-        <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${currentIndex !== null ? ' pb-[92px]' : ''}`} role="dialog" aria-modal="true" aria-labelledby="netease-import-title">
-          <div className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${currentIndex !== null ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
+        <div className={`modal-safe-area fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm${hasTrack ? ' pb-[92px]' : ''}`} role="dialog" aria-modal="true" aria-labelledby="netease-import-title">
+          <div className={`flex w-[min(680px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-panel/95 shadow-2xl shadow-black/50 backdrop-blur-2xl ${hasTrack ? 'max-h-[calc(100dvh-140px)]' : 'max-h-[calc(100dvh-4rem)]'}`}>
             <div className="flex shrink-0 items-center justify-between border-b border-white/[0.08] px-6 py-4">
               <div className="flex items-baseline gap-3">
                 <h2 id="netease-import-title" className="text-base font-semibold text-white">新加入的音乐</h2>
@@ -178,11 +180,25 @@ export default function AppendView(): React.JSX.Element {
                     <span className="w-7 shrink-0 text-center text-sm font-mono leading-none tabular-nums text-neutral-500">{index + 1}</span>
                     <FileOutput size={18} className="shrink-0 text-neutral-400" />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">{fileName}</span>
+                    {neteaseResult.missingCoverFiles.includes(fileName) && (
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-amber-300/75"><ImageOff size={14} />无封面</span>
+                    )}
                   </div>
                 ))
               )}
+              {neteaseResult.missingCoverFiles.length > 0 && (
+                <div className="mt-4 flex items-center gap-2 px-3 text-xs text-amber-300/75"><ImageOff size={15} />{neteaseResult.missingCoverFiles.length} 首没有内嵌封面，可从网易云目录的 meta 文件夹补充。</div>
+              )}
               {neteaseResult.failedFiles.length > 0 && (
-                <div className="mt-4 flex items-center gap-2 px-3 text-xs text-amber-300/75"><TriangleAlert size={15} />{neteaseResult.failedFiles.length} 个文件未能处理，源文件已保留。</div>
+                <>
+                  <div className="mt-4 flex items-center gap-2 px-3 text-xs text-amber-300/75"><TriangleAlert size={15} />{neteaseResult.failedFiles.length} 个文件未能处理，源文件已保留。</div>
+                  {neteaseResult.failedFiles.map((file) => (
+                    <div key={file.fileName} className="mt-1 flex items-baseline gap-3 px-3 py-1.5 text-xs">
+                      <span className="min-w-0 flex-1 truncate text-neutral-300">{file.fileName}</span>
+                      <span className="shrink-0 text-amber-300/75">{file.message}</span>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           </div>

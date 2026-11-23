@@ -4,12 +4,10 @@ import type { NavigationSession, NavigationTarget, NavigationView } from '../../
 export type NavTarget = NavigationTarget
 export type ViewKey = NavigationView
 
-/* 从 Music 列表跳转到分类详情时，记录搜索词与滚动位置；仅在当前运行期间保留。 */
-export interface ReturnContext {
-  view: 'music'
-  scrollTop: number
-  query: string
-}
+/* 跨视图返回信息仅在当前运行期间保留；Append 的编辑表单由 App 在访问详情期间保留。 */
+export type ReturnContext =
+  | { view: 'music'; scrollTop: number; query: string }
+  | { view: 'append' }
 
 interface NavState {
   target: NavTarget | null
@@ -31,7 +29,7 @@ export const useNavStore = create<NavState>((set, get) => ({
   restoreSignal: null,
   navigate: (target, returnContext) => {
     const view: ViewKey = target.view === 'tagType' ? 'tag' : target.view
-    set({ target, returnTo: returnContext ?? null, restoreSignal: null })
+    set({ target, returnTo: returnContext ?? get().returnTo, restoreSignal: null })
     persistNavigation({ view, target })
   },
   restoreSession: (session) => set({ target: session.target, returnTo: null, restoreSignal: null }),

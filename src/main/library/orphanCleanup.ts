@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3'
 import type { LibraryPaths } from './paths'
 import { deleteArtistRecord, isArtistMember } from '../db/queries/artists'
 
-export interface OrphanCandidates {
+interface OrphanCandidates {
   albumIds: Set<number>
   artistIds: Set<number>
 }

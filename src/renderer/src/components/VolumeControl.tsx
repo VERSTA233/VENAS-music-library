@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { useId, useRef, useState, type CSSProperties } from 'react'
 import { Volume1, Volume2, VolumeX } from 'lucide-react'
 import { usePlayerStore } from '../stores/playerStore'
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer'
 
 export default function VolumeControl(): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -14,14 +15,7 @@ export default function VolumeControl(): React.JSX.Element {
   const percent = muted ? 0 : Math.round(volume * 100)
   const Icon = silent ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
-  useEffect(() => {
-    if (!open) return
-    function closeOnOutsidePointer(event: PointerEvent): void {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
-  }, [open])
+  useDismissibleLayer(open, [containerRef], () => setOpen(false))
 
   return (
     <div ref={containerRef} className="relative flex items-center" role="group" aria-label="音量控制"

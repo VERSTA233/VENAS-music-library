@@ -1,9 +1,10 @@
-import type { TagRow } from '../../../shared/types'
+import type { SongUpdateData, TagRow } from '../../../shared/types'
 import { Eraser } from 'lucide-react'
 import ArtistPicker, { type ArtistFormEntry } from './ArtistPicker'
 import TagPicker from './TagPicker'
 import AlbumPicker, { type AlbumFormState } from './AlbumPicker'
 import YMDDateInput from './YMDDateInput'
+import { artistSelectionKey } from '../../../shared/artistSelection'
 
 export interface SongFormValue {
   title: string
@@ -20,16 +21,43 @@ export interface SongFormValue {
   comment: string
 }
 
+/* 入库与编辑共用字段转换；文件操作与 Tag 载荷仍由各自提交入口处理。 */
+export function songFormMetadata(value: SongFormValue, album = value.album): Omit<SongUpdateData, 'fileName' | 'replacementFilePath' | 'tagIds'> {
+  return {
+    title: value.title.trim(),
+    firstHeardDate: value.firstHeardDate.trim() || null,
+    lyric: value.lyric.trim() || null,
+    lyricFilePath: value.lyricFilePath,
+    artists: value.artists,
+    album: album.title.trim() ? {
+      title: album.title.trim(),
+      releaseDate: album.releaseDate.trim() || null,
+      albumType: album.albumType || null,
+      totalDiscs: album.totalDiscs.trim() ? Number(album.totalDiscs) : null,
+      labels: album.labels,
+      discNumber: album.discNumber.trim() ? Number(album.discNumber) : null,
+      trackNumber: album.trackNumber.trim() ? Number(album.trackNumber) : null,
+      artists: album.artists,
+      albumId: album.selectedAlbumId
+    } : null,
+    score: value.score.trim() ? Number(value.score) : null,
+    comment: value.comment.trim() || null
+  }
+}
+
 interface SongFormProps {
   value: SongFormValue
   onChange: (value: SongFormValue) => void
+  onOpenArtist?: (artistId: number) => void
+  onOpenAlbum?: (albumId: number) => void
+  onOpenTag?: (tag: TagRow) => void
 }
 
 /*
  * 歌曲信息的通用编辑表单：曲名/艺术家/专辑/歌词(含导入)/评分/Tags，
  * 供"添加到音乐库"与"编辑歌曲信息"两个界面共用，保持字段顺序与交互一致。
  */
-export default function SongForm({ value, onChange }: SongFormProps): React.JSX.Element {
+export default function SongForm({ value, onChange, onOpenArtist, onOpenAlbum, onOpenTag }: SongFormProps): React.JSX.Element {
   /* 弹出系统文件选择对话框导入歌词，可选任意目录下的 .lrc 文件 */
   async function handlePickLyricFile(): Promise<void> {
     const picked = await window.api.append.pickLyricFile()
@@ -38,13 +66,12 @@ export default function SongForm({ value, onChange }: SongFormProps): React.JSX.
   }
 
   /*
-   * 歌曲艺术家列表与专辑艺术家列表本质是两份独立的 ArtistFormEntry[]，但入库时若同名且均为红灯（未匹配数据库），
-   * 实际指向同一个即将新建的艺术家：修改其中一处的 type 时，同步另一处同名（忽略大小写）且尚未匹配数据库的条目。
+   * 同步歌曲与专辑中同一个待新建艺术家的类型；按选择身份区分同名的已有记录。
    */
-  function syncArtistType(name: string, type: 'Person' | 'Group' | null): void {
-    const lower = name.toLowerCase()
+  function syncArtistType(artist: ArtistFormEntry, type: 'Person' | 'Group' | null): void {
+    const key = artistSelectionKey(artist)
     const syncList = (list: ArtistFormEntry[]): ArtistFormEntry[] =>
-      list.map((a) => (a.name.trim().toLowerCase() === lower ? { ...a, type } : a))
+      list.map((a) => (artistSelectionKey(a) === key ? { ...a, type } : a))
     onChange({ ...value, artists: syncList(value.artists), album: { ...value.album, artists: syncList(value.album.artists) } })
   }
 
@@ -55,7 +82,7 @@ export default function SongForm({ value, onChange }: SongFormProps): React.JSX.
         <input
           value={value.title}
           onChange={(e) => onChange({ ...value, title: e.target.value })}
-          className="bg-white/5 border border-white/10 rounded px-2 py-1 text-sm outline-none focus:border-white/30"
+          className="h-8 bg-white/5 border border-white/10 rounded px-2 text-sm outline-none focus:border-white/30"
         />
       </div>
 
@@ -63,8 +90,10 @@ export default function SongForm({ value, onChange }: SongFormProps): React.JSX.
         <label className="text-xs text-neutral-500">艺术家</label>
         <ArtistPicker
           artists={value.artists}
+          relatedArtists={value.album.artists}
+          onOpenArtist={onOpenArtist}
           onChange={(artists) => onChange({ ...value, artists })}
-          onTypeChange={(name, type) => syncArtistType(name, type)}
+          onTypeChange={syncArtistType}
         />
       </div>
 
@@ -72,14 +101,17 @@ export default function SongForm({ value, onChange }: SongFormProps): React.JSX.
         <label className="text-xs text-neutral-500">专辑</label>
         <AlbumPicker
           value={value.album}
+          relatedArtists={value.artists}
+          onOpenArtist={onOpenArtist}
+          onOpenAlbum={onOpenAlbum}
           onChange={(album) => onChange({ ...value, album })}
-          onArtistTypeChange={(name, type) => syncArtistType(name, type)}
+          onArtistTypeChange={syncArtistType}
         />
       </div>
 
       <div className="-mb-2 flex flex-col gap-1">
         <label className="text-xs text-neutral-500">Tags</label>
-        <TagPicker tags={value.tags} onChange={(tags) => onChange({ ...value, tags })} />
+        <TagPicker tags={value.tags} onChange={(tags) => onChange({ ...value, tags })} onOpenTag={onOpenTag} />
       </div>
 
       <div className="flex flex-col gap-1">
