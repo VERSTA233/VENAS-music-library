@@ -13,6 +13,7 @@ const suites = {
   covers: [{ entry: 'tests/coverUpdates.test.ts' }],
   thumbnails: [{ entry: 'tests/thumbnailCache.test.ts', node: true }],
   'tag-ordering': [{ entry: 'tests/tagOrdering.test.ts', node: true }],
+  'list-sorting': [{ entry: 'tests/listSorting.test.ts' }],
   'artist-ingest': [{ entry: 'tests/ingestArtistSelection.test.ts' }],
   'artist-aliases': [{ entry: 'tests/artistAliases.test.ts' }],
   'audio-integrity': [{ entry: 'tests/audioIntegrity.ts', test: false, args: directory => [directory, inspector] }],

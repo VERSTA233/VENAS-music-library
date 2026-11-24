@@ -1,5 +1,6 @@
 import Store from 'electron-store'
-import type { MacAudioBackend, NavigationSession, PlaybackSession, PlaybackVolume } from '../shared/types'
+import type { ListSortPreferences, MacAudioBackend, NavigationSession, PlaybackSession, PlaybackVolume } from '../shared/types'
+import { defaultListSortPreferences } from '../shared/listSorting'
 
 interface AppSettings {
   playbackVolume: PlaybackVolume
@@ -15,6 +16,7 @@ interface AppSettings {
   playbackSession: PlaybackSession | null
   /* 最近所在的栏目或分类详情；搜索词和临时弹窗不持久化。 */
   navigationSession: NavigationSession
+  listSortPreferences: ListSortPreferences
 }
 
 export const settings = new Store<AppSettings>({
@@ -26,6 +28,7 @@ export const settings = new Store<AppSettings>({
     systemRoot: null,
     neteaseMusicRoot: null,
     playbackSession: null,
-    navigationSession: { view: 'music', target: null }
+    navigationSession: { view: 'music', target: null },
+    listSortPreferences: defaultListSortPreferences
   }
 })

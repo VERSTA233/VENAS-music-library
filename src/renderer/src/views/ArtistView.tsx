@@ -7,10 +7,7 @@ import type {
   SongListItem,
   LabelListItem,
   LabelAlbumGroup,
-  AlbumSongItem,
-  SongListSort,
-  ArtistListSort,
-  SortDirection
+  AlbumSongItem
 } from '../../../shared/types'
 import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
@@ -19,10 +16,12 @@ import SongListToolbarActions from '../components/SongListToolbarActions'
 import RandomPlayButton from '../components/RandomPlayButton'
 import BrowseToolbarActions from '../components/BrowseToolbarActions'
 import ListSortControl from '../components/ListSortControl'
+import LibraryContent from '../components/LibraryContent'
 import SongEditModal from '../components/SongEditModal'
 import ArtistEditModal from '../components/ArtistEditModal'
 import Cover from '../components/Cover'
 import { useNavStore } from '../stores/navStore'
+import { useListSort } from '../stores/listSortStore'
 import { filterArtists, filterSongs, sortSongs } from '../songSearch'
 
 type GridItem = ArtistListItem | LabelListItem
@@ -47,8 +46,7 @@ export default function ArtistView(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Selected | null>(null)
   const [memberHistory, setMemberHistory] = useState<Selected[]>([])
-  const [sort, setSort] = useState<ArtistListSort>('name')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+  const { sort, sortDirection, setSort, setSortDirection } = useListSort('artists')
   const [query, setQuery] = useState('')
   const { target, clearTarget, navigate, openRoot, requestReturn } = useNavStore()
 
@@ -112,11 +110,6 @@ export default function ArtistView(): React.JSX.Element {
     return [...filteredItems].sort((a, b) => multiplier * (a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id))
   }, [filteredItems, sort, sortDirection])
 
-  function handleSortChange(nextSort: ArtistListSort): void {
-    setSort(nextSort)
-    setSortDirection(nextSort === 'name' ? 'asc' : 'desc')
-  }
-
   if (selected !== null) {
     return selected.isLabel ? (
       <LabelDetail key={`label:${selected.id}`} labelId={selected.id} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selected.id)} onMemberNavigate={handleMemberNavigate} />
@@ -134,16 +127,14 @@ export default function ArtistView(): React.JSX.Element {
           onQueryChange={setQuery}
           placeholder="搜索艺术家或厂牌"
           searchLabel="搜索艺术家或厂牌"
-          sortControl={<ListSortControl kind="artist" value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
+          sortControl={<ListSortControl kind="artist" value={sort} onChange={setSort} direction={sortDirection} onDirectionChange={setSortDirection} />}
           count={filteredItems.length}
           countUnit="位"
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
-          <div className="py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : visibleItems.length === 0 ? (
+      <LibraryContent loading={loading} layout="artists" className="p-6">
+        {visibleItems.length === 0 ? (
           <div className="py-8 text-center text-neutral-500 text-sm">{query ? '没有匹配的艺术家或厂牌' : '暂无艺术家'}</div>
         ) : (
           <div className="grid gap-x-5 gap-y-7" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(145px, 1fr))' }}>
@@ -153,7 +144,7 @@ export default function ArtistView(): React.JSX.Element {
                 <button
                   key={item.id}
                   onClick={() => navigate({ view: 'artist', id: item.id, isLabel })}
-                  className="group flex flex-col items-center gap-2.5 text-left transition-transform duration-150 ease-out active:scale-[0.98]"
+                  className="library-card group flex flex-col items-center gap-2.5 text-left"
                 >
                   <div className="aspect-square w-full overflow-hidden rounded-full bg-white/[0.05] shadow-lg shadow-black/20 ring-1 ring-white/[0.06] transition duration-200 group-hover:ring-white/[0.18]">
                     <Cover
@@ -173,7 +164,7 @@ export default function ArtistView(): React.JSX.Element {
             })}
           </div>
         )}
-      </div>
+      </LibraryContent>
     </div>
   )
 }
@@ -194,8 +185,7 @@ function ArtistDetail({ artistId, onBack, onDeleted, onMemberNavigate }: ArtistD
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<SongListItem | null>(null)
   const [editingArtist, setEditingArtist] = useState(false)
-  const [sort, setSort] = useState<SongListSort>('library')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const { sort, sortDirection, setSort, setSortDirection } = useListSort('artistSongs')
   const [query, setQuery] = useState('')
   const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
 
@@ -219,11 +209,6 @@ function ArtistDetail({ artistId, onBack, onDeleted, onMemberNavigate }: ArtistD
     [artist?.name, query, songs]
   )
   const sortedSongs = useMemo(() => sortSongs(filteredSongs, sort, sortDirection), [filteredSongs, sort, sortDirection])
-
-  function handleSortChange(nextSort: SongListSort): void {
-    setSort(nextSort)
-    setSortDirection(nextSort === 'title' ? 'asc' : 'desc')
-  }
 
   function refresh(): void {
     window.api.artists.detail(artistId).then((detail) => {
@@ -275,7 +260,7 @@ function ArtistDetail({ artistId, onBack, onDeleted, onMemberNavigate }: ArtistD
           query={query}
           onQueryChange={setQuery}
           sort={sort}
-          onSortChange={handleSortChange}
+          onSortChange={setSort}
           direction={sortDirection}
           onDirectionChange={setSortDirection}
           count={filteredSongs.length}
@@ -284,11 +269,9 @@ function ArtistDetail({ artistId, onBack, onDeleted, onMemberNavigate }: ArtistD
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
+      <LibraryContent loading={loading} className="py-2">
         {!loading && <MemberLinks members={members} onNavigate={onMemberNavigate} />}
-        {loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : filteredSongs.length === 0 ? (
+        {filteredSongs.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该艺术家暂无关联曲目</div>
         ) : (
           <SongList
@@ -303,7 +286,7 @@ function ArtistDetail({ artistId, onBack, onDeleted, onMemberNavigate }: ArtistD
             onEdit={(song) => setEditingSong(song)}
           />
         )}
-      </div>
+      </LibraryContent>
 
       {editingSong && (
         <SongEditModal
@@ -352,8 +335,7 @@ function LabelDetail({ labelId, onBack, onDeleted, onMemberNavigate }: LabelDeta
   const [loading, setLoading] = useState(true)
   const [editingSong, setEditingSong] = useState<AlbumSongItem | null>(null)
   const [editingLabel, setEditingLabel] = useState(false)
-  const [sort, setSort] = useState<SongListSort>('library')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const { sort, sortDirection, setSort, setSortDirection } = useListSort('labelSongs')
   const [query, setQuery] = useState('')
   const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
 
@@ -391,11 +373,6 @@ function LabelDetail({ labelId, onBack, onDeleted, onMemberNavigate }: LabelDeta
   )
   const allSongs = sortedGroups.flatMap((g) => g.songs)
 
-  function handleSortChange(nextSort: SongListSort): void {
-    setSort(nextSort)
-    setSortDirection(nextSort === 'title' ? 'asc' : 'desc')
-  }
-
   return (
     <div className="flex flex-col h-full">
       <div className="library-toolbar sticky top-0 z-10 gap-3 border-b border-white/[0.08]">
@@ -431,7 +408,7 @@ function LabelDetail({ labelId, onBack, onDeleted, onMemberNavigate }: LabelDeta
           query={query}
           onQueryChange={setQuery}
           sort={sort}
-          onSortChange={handleSortChange}
+          onSortChange={setSort}
           direction={sortDirection}
           onDirectionChange={setSortDirection}
           count={allSongs.length}
@@ -440,11 +417,9 @@ function LabelDetail({ labelId, onBack, onDeleted, onMemberNavigate }: LabelDeta
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
+      <LibraryContent loading={loading} className="py-2">
         {!loading && <MemberLinks members={members} onNavigate={onMemberNavigate} />}
-        {loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : sortedGroups.length === 0 ? (
+        {sortedGroups.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该厂牌暂无关联专辑</div>
         ) : (
           sortedGroups.map((group, gi) => {
@@ -477,7 +452,7 @@ function LabelDetail({ labelId, onBack, onDeleted, onMemberNavigate }: LabelDeta
             )
           })
         )}
-      </div>
+      </LibraryContent>
 
       {editingSong && (
         <SongEditModal

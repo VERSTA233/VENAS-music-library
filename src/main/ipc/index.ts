@@ -98,7 +98,8 @@ import {
 } from '../db/queries/tags'
 import { listLabels, getLabelById, getLabelAlbumGroups } from '../db/queries/labels'
 import { touchLastHeard, getLastHeardDates, updateSongInfo } from '../db/queries/songInfo'
-import type { SongUpdateData, ArtistAliasType, ArtistUpdateData, AlbumUpdateData, PlaybackSession, NavigationSession, SongListSort, SortDirection, MusicRootInspection, TagUpdateData, AudioOutputSettings } from '../../shared/types'
+import type { SongUpdateData, ArtistAliasType, ArtistUpdateData, AlbumUpdateData, PlaybackSession, NavigationSession, SongListSort, SortDirection, MusicRootInspection, TagUpdateData, AudioOutputSettings, ListSortPreferences } from '../../shared/types'
+import { isListSortPreference, normalizeListSortPreferences } from '../../shared/listSorting'
 
 /* 注册全部 IPC handler，供 preload 暴露给渲染进程调用 */
 export function registerIpcHandlers(paths: LibraryPaths, audioOutputRuntime: AudioOutputRuntime): void {
@@ -479,6 +480,12 @@ export function registerIpcHandlers(paths: LibraryPaths, audioOutputRuntime: Aud
   /* ---- Navigation ---- */
   handle('navigation:getSession', () => settings.get('navigationSession'))
   handle('navigation:saveSession', (_e, session: NavigationSession) => settings.set('navigationSession', session))
+  handle('navigation:getListSortPreferences', () => normalizeListSortPreferences(settings.get('listSortPreferences')))
+  handle('navigation:setListSortPreference', (_e, key: keyof ListSortPreferences, preference: ListSortPreferences[keyof ListSortPreferences]) => {
+    if (!isListSortPreference(key, preference)) throw new Error('排序设置无效')
+    const preferences = normalizeListSortPreferences(settings.get('listSortPreferences'))
+    settings.set('listSortPreferences', { ...preferences, [key]: preference })
+  })
 
   /* ---- Library ---- */
   handle('library:getRoots', () => ({

@@ -1,17 +1,20 @@
 import { useEffect, useState, useRef } from 'react'
 import { useLibraryStore } from '../stores/libraryStore'
+import { useListSort } from '../stores/listSortStore'
 import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
 import SongEditModal from '../components/SongEditModal'
 import SongListToolbarActions from '../components/SongListToolbarActions'
 import RandomPlayButton from '../components/RandomPlayButton'
+import LibraryContent from '../components/LibraryContent'
 import type { SongListItem } from '../../../shared/types'
 import { useNavStore } from '../stores/navStore'
 
 /* Music 库列表视图：完整展示 songs 表，双击播放，"..." 进入编辑弹窗。 */
 export default function MusicView(): React.JSX.Element {
-  const { songs, total, sort, sortDirection, query, loading, ensureSongs, fetchSongs, setSort, setSortDirection, setQuery } = useLibraryStore()
+  const { songs, total, query, loaded, loading, error, ensureSongs, fetchSongs, setQuery } = useLibraryStore()
+  const { sort, sortDirection, setSort, setSortDirection } = useListSort('music')
   const { currentSongId, playQueue, playRandomQueue } = useListPlayback()
   const [editingSong, setEditingSong] = useState<SongListItem | null>(null)
   const [searchInput, setSearchInput] = useState(query)
@@ -20,7 +23,7 @@ export default function MusicView(): React.JSX.Element {
 
   useEffect(() => {
     void ensureSongs().catch(() => undefined)
-  }, [ensureSongs])
+  }, [ensureSongs, sort, sortDirection])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -58,10 +61,14 @@ export default function MusicView(): React.JSX.Element {
         />
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : songs.length === 0 ? (
+      <LibraryContent scrollRef={scrollRef} loading={loading || (!loaded && !error)}>
+        {error && (
+          <div role="alert" className="flex items-center justify-center gap-3 px-4 py-5 text-sm text-neutral-400">
+            <span>加载失败：{error}</span>
+            <button type="button" onClick={() => { void fetchSongs().catch(() => undefined) }} className="rounded-lg bg-white/10 px-3 py-1.5 text-neutral-200 hover:bg-white/15">重试</button>
+          </div>
+        )}
+        {songs.length === 0 && !error ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">
             {query ? (
               <>
@@ -83,7 +90,7 @@ export default function MusicView(): React.JSX.Element {
             onEdit={(song) => setEditingSong(song)}
           />
         )}
-      </div>
+      </LibraryContent>
 
       {editingSong && (
         <SongEditModal

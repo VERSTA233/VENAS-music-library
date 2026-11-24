@@ -40,6 +40,7 @@ import type {
   AudioIntegrityProgress,
   AudioIntegrityProgressUpdate,
   NavigationSession,
+  ListSortPreferences,
   MusicRootInspection,
   MissingAudioFile,
   PlaylistExportInspection,
@@ -189,7 +190,10 @@ const api = {
   },
   navigation: {
     getSession: (): Promise<NavigationSession> => ipcRenderer.invoke('navigation:getSession'),
-    saveSession: (session: NavigationSession): Promise<void> => ipcRenderer.invoke('navigation:saveSession', session)
+    saveSession: (session: NavigationSession): Promise<void> => ipcRenderer.invoke('navigation:saveSession', session),
+    getListSortPreferences: (): Promise<ListSortPreferences> => ipcRenderer.invoke('navigation:getListSortPreferences'),
+    setListSortPreference: <K extends keyof ListSortPreferences>(key: K, preference: ListSortPreferences[K]): Promise<void> =>
+      ipcRenderer.invoke('navigation:setListSortPreference', key, preference)
   },
   library: {
     onCoverUpdated: (callback: (update: CoverUpdate) => void): (() => void) => {

@@ -11,6 +11,7 @@ import { useNavStore } from '../stores/navStore'
 import { filterSongs } from '../songSearch'
 import TagEditModal from '../components/TagEditModal'
 import BrowseToolbarActions from '../components/BrowseToolbarActions'
+import LibraryContent from '../components/LibraryContent'
 import { orderTagsForDisplay } from '../../../shared/tagOrdering'
 
 /*
@@ -129,11 +130,9 @@ export default function TagView(): React.JSX.Element {
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-2">
+      <LibraryContent loading={query.trim() ? searching : loading} layout="tags" className="px-3 py-2">
         {query.trim() ? (
-          searching ? (
-            <div className="px-4 py-8 text-center text-neutral-500 text-sm">搜索中...</div>
-          ) : searchResults.length === 0 ? (
+          searchResults.length === 0 ? (
             <div className="px-4 py-8 text-center text-neutral-500 text-sm">没有匹配的 Tag</div>
           ) : (
             <div className="flex flex-col gap-0.5">
@@ -149,8 +148,6 @@ export default function TagView(): React.JSX.Element {
               ))}
             </div>
           )
-        ) : loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
         ) : types.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">暂无 Tag</div>
         ) : (
@@ -167,7 +164,7 @@ export default function TagView(): React.JSX.Element {
             ))}
           </div>
         )}
-      </div>
+      </LibraryContent>
     </div>
   )
 }
@@ -250,10 +247,8 @@ function TagTypeDetail({ tagType, onBack, onSelectTag, onTypeCountChanged }: Tag
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-2">
-        {loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : tags.length === 0 ? (
+      <LibraryContent loading={loading} layout="tags" className="px-3 py-2">
+        {tags.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该分类下暂无 Tag</div>
         ) : (
           <div className="flex flex-col gap-0.5">
@@ -269,7 +264,7 @@ function TagTypeDetail({ tagType, onBack, onSelectTag, onTypeCountChanged }: Tag
             ))}
           </div>
         )}
-      </div>
+      </LibraryContent>
     </div>
   )
 }
@@ -375,10 +370,8 @@ function TagDetail({ tagId, onBack, onTagTypeChanged, onDeleted }: TagDetailProp
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
-        {loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : filteredSongs.length === 0 ? (
+      <LibraryContent loading={loading} className="py-2">
+        {filteredSongs.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该 Tag 暂无关联曲目</div>
         ) : (
           <SongList
@@ -452,7 +445,7 @@ function TagDetail({ tagId, onBack, onTagTypeChanged, onDeleted }: TagDetailProp
             }
           />
         )}
-      </div>
+      </LibraryContent>
 
       {editingSong && (
         <SongEditModal

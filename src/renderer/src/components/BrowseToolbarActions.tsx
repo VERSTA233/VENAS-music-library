@@ -25,7 +25,7 @@ export default function BrowseToolbarActions({
 }: BrowseToolbarActionsProps): React.JSX.Element {
   return (
     <div className="ml-auto flex min-w-0 items-center gap-3">
-      <label className="relative flex h-8 w-56 min-w-0 items-center rounded-lg bg-white/[0.06] text-neutral-400 transition focus-within:bg-white/[0.1]">
+      <label className="library-toolbar-control relative flex w-56 min-w-0 items-center text-neutral-400">
         <Search size={15} className="pointer-events-none absolute left-2.5 text-neutral-600" aria-hidden="true" />
         <input
           value={query}

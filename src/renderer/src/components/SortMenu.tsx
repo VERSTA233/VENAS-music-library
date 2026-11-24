@@ -35,7 +35,7 @@ export default function SortMenu<T extends string>({
   useDismissibleLayer(open, [rootRef], () => setOpen(false), true)
 
   return (
-    <div ref={rootRef} className="relative flex h-8 shrink-0 items-center rounded-lg border border-white/[0.1] bg-white/[0.06] text-neutral-300 shadow-sm transition hover:border-white/[0.16] hover:bg-white/[0.1]">
+    <div ref={rootRef} className="library-toolbar-control relative flex shrink-0 items-center text-neutral-300">
       <button
         type="button"
         onClick={() => onDirectionChange(direction === 'asc' ? 'desc' : 'asc')}

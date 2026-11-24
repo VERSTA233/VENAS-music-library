@@ -37,9 +37,10 @@ export function getTagSongs(db: Database.Database, tagId: number): TagSongItem[]
   const rows = db
     .prepare<
       [number],
-      { id: number; title: string; length: number | null; file_name: string; add_time: string | null; comment: string | null; sort_order: number }
+      Omit<TagSongItem, 'artistNames'>
     >(
-      `SELECT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name, si.add_time AS add_time, st.comment AS comment, st.sort_order AS sort_order
+      `SELECT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name, si.add_time AS add_time,
+              si.last_heard_date, si.score, st.comment AS comment, st.sort_order AS sort_order
        FROM song_tags st JOIN songs s ON s.id = st.song_id
        LEFT JOIN song_info si ON si.song_id = s.id
        WHERE st.tag_id = ? ORDER BY st.sort_order ASC, s.id ASC`

@@ -1,5 +1,6 @@
 import type { AlbumListItem, ArtistListItem, LabelListItem, SongListItem, SongListSort, SortDirection } from '../../shared/types'
 import { buildSearchTerms } from '../../shared/searchTerms'
+import { defaultSortDirection } from '../../shared/listSorting'
 
 /* Artist 第一层网格按名称搜索，支持罗马字、平假名和片假名互相匹配。 */
 export function filterArtists<T extends ArtistListItem | LabelListItem>(items: T[], query: string): T[] {
@@ -39,13 +40,18 @@ export function filterSongs<T extends SongListItem>(songs: T[], query: string, c
 
 /* 复制后再排序，保留查询的原始业务顺序（例如专辑曲序）。 */
 export function sortSongs<T extends SongListItem>(songs: T[], sort: SongListSort, direction?: SortDirection): T[] {
-  if (sort === 'library') return direction === 'asc' ? [...songs].reverse() : songs
-
-  const multiplier = (direction ?? (sort === 'addedAt' ? 'desc' : 'asc')) === 'asc' ? 1 : -1
+  const multiplier = (direction ?? defaultSortDirection(sort)) === 'asc' ? 1 : -1
   return [...songs].sort((a, b) => {
+    if (sort === 'library') return multiplier * (a.id - b.id)
     if (sort === 'title') return multiplier * (a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) || a.id - b.id)
-    const aTime = a.add_time ? Date.parse(a.add_time) : Number.NEGATIVE_INFINITY
-    const bTime = b.add_time ? Date.parse(b.add_time) : Number.NEGATIVE_INFINITY
-    return multiplier * (aTime !== bTime ? aTime - bTime : a.id - b.id)
+    const field = sort === 'score' ? 'score' : sort === 'lastHeard' ? 'last_heard_date' : 'add_time'
+    const aValue = a[field]
+    const bValue = b[field]
+    /* 未评分、未聆听或缺少添加日期的歌曲，在两个方向中都置底；0 分是有效评分。 */
+    if (aValue == null || bValue == null) {
+      return aValue == null && bValue == null ? multiplier * (a.id - b.id) : aValue == null ? 1 : -1
+    }
+    const compared = aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+    return multiplier * (compared || a.id - b.id)
   })
 }

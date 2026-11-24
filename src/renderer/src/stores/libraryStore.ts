@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { SongListItem, SongListSort, SortDirection } from '../../../shared/types'
+import type { SongListItem } from '../../../shared/types'
+import { useListSortStore } from './listSortStore'
 
 let requestVersion = 0
 let invalidationVersion = 0
@@ -7,17 +8,14 @@ let invalidationVersion = 0
 interface LibraryState {
   songs: SongListItem[]
   total: number
-  sort: SongListSort
-  sortDirection: SortDirection
   query: string
   loading: boolean
+  error: string | null
   loaded: boolean
   stale: boolean
   fetchSongs: () => Promise<void>
   ensureSongs: () => Promise<void>
   invalidateSongs: () => void
-  setSort: (sort: SongListSort) => Promise<void>
-  setSortDirection: (direction: SortDirection) => Promise<void>
   setQuery: (query: string) => Promise<void>
   refresh: () => Promise<void>
 }
@@ -26,19 +24,19 @@ interface LibraryState {
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   songs: [],
   total: 0,
-  sort: 'library',
-  sortDirection: 'desc',
   query: '',
   loading: false,
+  error: null,
   loaded: false,
   stale: true,
   fetchSongs: async () => {
     const version = ++requestVersion
     const invalidationAtStart = invalidationVersion
-    const { sort, sortDirection, query } = get()
-    if (!get().loaded) set({ loading: true })
+    const { query } = get()
+    const { sort, direction } = useListSortStore.getState().preferences.music
+    set({ error: null, ...(!get().loaded ? { loading: true } : {}) })
     try {
-      const { items, total } = await window.api.songs.list(sort, query, sortDirection)
+      const { items, total } = await window.api.songs.list(sort, query, direction)
       if (version === requestVersion) {
         set({
           songs: items,
@@ -49,7 +47,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         })
       }
     } catch (error) {
-      if (version === requestVersion) set({ loading: false })
+      if (version === requestVersion) set({ loading: false, error: error instanceof Error ? error.message : String(error) })
       throw error
     }
   },
@@ -62,14 +60,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     invalidationVersion += 1
     set({ stale: true })
   },
-  setSort: async (sort: SongListSort) => {
-    set({ sort, sortDirection: sort === 'title' ? 'asc' : 'desc' })
-    await get().fetchSongs()
-  },
-  setSortDirection: async (sortDirection: SortDirection) => {
-    set({ sortDirection })
-    await get().fetchSongs()
-  },
   setQuery: async (query: string) => {
     const normalized = query.trim()
     if (normalized === get().query) return
@@ -80,3 +70,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     await get().fetchSongs()
   }
 }))
+
+useListSortStore.subscribe((state, previous) => {
+  if (state.preferences.music !== previous.preferences.music) useLibraryStore.getState().invalidateSongs()
+})

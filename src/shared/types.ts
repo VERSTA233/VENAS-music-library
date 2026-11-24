@@ -309,12 +309,27 @@ export interface SongListItem {
   file_name: string
   /* 音频文件的添加时间，用于歌曲列表按添加时间排序；历史数据可能为空。 */
   add_time: string | null
+  last_heard_date: string | null
+  score: number | null
   artistNames: string // 拼接后的显示用字符串，如 "Sakuzyo / Xi"
 }
 
-export type SongListSort = 'library' | 'title' | 'addedAt'
+export type SongListSort = 'library' | 'title' | 'addedAt' | 'lastHeard' | 'score'
 
 export type SortDirection = 'asc' | 'desc'
+
+export interface ListSortPreference<T extends string> {
+  sort: T
+  direction: SortDirection
+}
+
+export interface ListSortPreferences {
+  music: ListSortPreference<SongListSort>
+  artists: ListSortPreference<ArtistListSort>
+  albums: ListSortPreference<AlbumListSort>
+  artistSongs: ListSortPreference<SongListSort>
+  labelSongs: ListSortPreference<SongListSort>
+}
 
 export interface AlbumLabel {
   id: number

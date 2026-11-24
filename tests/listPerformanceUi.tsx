@@ -16,7 +16,7 @@ async function run(): Promise<string[]> {
   const root = createRoot(host)
   const library = useLibraryStore.getState(), player = usePlayerStore.getState()
   const songs: SongListItem[] = Array.from({ length: 200 }, (_, index) => ({
-    id: index + 1, title: `Song ${index + 1}`, length: 200, file_name: `${index}.flac`, add_time: null, artistNames: 'Artist'
+    id: index + 1, title: `Song ${index + 1}`, length: 200, file_name: `${index}.flac`, add_time: null, last_heard_date: null, score: null, artistNames: 'Artist'
   }))
   let loads = 0, commits = 0
   window.api = { songs: { cover: async () => { loads++; return null }, mediaUrl: file => `mock://${file}` } } as typeof window.api
@@ -35,7 +35,7 @@ async function run(): Promise<string[]> {
     check(commits === before && loads === initialLoads, `Timeline updates rendered Music ${commits - before} times or reloaded covers`)
     flushSync(() => usePlayerStore.setState({ currentIndex: 1 }))
     const rows = host.querySelectorAll('.library-row')
-    check(!rows[0].className.includes('bg-white/[0.11]') && rows[1].className.includes('bg-white/[0.11]'), 'Changing tracks did not move the highlight')
+    check(rows[0].getAttribute('data-current') === 'false' && rows[1].getAttribute('data-current') === 'true', 'Changing tracks did not move the highlight')
     flushSync(() => root.render(null))
 
     let rowRenders = 0, played = '', edited = ''

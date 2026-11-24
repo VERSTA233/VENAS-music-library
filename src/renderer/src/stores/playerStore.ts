@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AppendEntry, PlaybackSession } from '../../../shared/types'
 import { isPermutation, playbackWeight, weightedOrder } from '../playback/weightedShuffle'
+import { useLibraryStore } from './libraryStore'
 
 /*
  * 播放队列里的一个条目：Music 库歌曲带 songId（用于 last_heard 打点），Append 试听没有 songId；
@@ -190,7 +191,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
     remember(localDate)
-    void window.api.playback.touchLastHeard(songId).then(remember).catch(() => {
+    void window.api.playback.touchLastHeard(songId).then(value => {
+      remember(value)
+      useLibraryStore.getState().invalidateSongs()
+    }).catch(() => {
       set({ playbackError: '最近播放日期保存失败，本次随机权重已在内存中更新。' })
     })
   },

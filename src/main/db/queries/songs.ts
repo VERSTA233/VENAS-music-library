@@ -12,22 +12,24 @@ export interface SongArtistInput {
 
 /* 查询完整 Music 库歌曲列表，含拼装好的艺术家显示字符串（按 role=Primary 优先、artist_order 排序）。 */
 export function listSongs(db: Database.Database, sort: SongListSort = 'library', query = '', direction: SortDirection = 'desc'): SongListItem[] {
-  const normalizedSort: SongListSort = sort === 'title' || sort === 'addedAt' ? sort : 'library'
+  const normalizedSort: SongListSort = sort === 'title' || sort === 'addedAt' || sort === 'lastHeard' || sort === 'score' ? sort : 'library'
   const normalizedDirection: SortDirection = direction === 'asc' ? 'asc' : 'desc'
   const order = normalizedDirection === 'asc' ? 'ASC' : 'DESC'
   const orderBy = {
     library: `s.id ${order}`,
     title: `s.title COLLATE NOCASE ${order}, s.id ${order}`,
-    addedAt: `si.add_time IS NULL ASC, si.add_time ${order}, s.id ${order}`
+    addedAt: `si.add_time IS NULL ASC, si.add_time ${order}, s.id ${order}`,
+    lastHeard: `si.last_heard_date IS NULL ASC, si.last_heard_date ${order}, s.id ${order}`,
+    score: `si.score IS NULL ASC, si.score ${order}, s.id ${order}`
   }[normalizedSort]
   const search = buildSongSearch(query)
   const rows = db.prepare(
-    `SELECT s.id, s.title, s.length, s.file_name, si.add_time
+    `SELECT s.id, s.title, s.length, s.file_name, si.add_time, si.last_heard_date, si.score
        FROM songs s
        LEFT JOIN song_info si ON si.song_id = s.id
        WHERE ${search.where}
        ORDER BY ${orderBy}`
-  ).all(search.parameters) as { id: number; title: string; length: number | null; file_name: string; add_time: string | null }[]
+  ).all(search.parameters) as Omit<SongListItem, 'artistNames'>[]
 
   return withArtistNames(db, rows)
 }

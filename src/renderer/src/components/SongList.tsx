@@ -52,9 +52,8 @@ function SongListRow<T extends SongListItem>({
           event.preventDefault()
           onPlay(index)
         }}
-        className={`library-row group flex min-h-16 items-center gap-3 rounded-xl px-3 py-2.5 cursor-default hover:bg-white/[0.06] ${
-          isCurrent ? 'bg-white/[0.11] ring-1 ring-white/[0.06]' : ''
-        }`}
+        className="library-row library-song-row group"
+        data-current={isCurrent}
       >
         {onStartDrag && (
           <button

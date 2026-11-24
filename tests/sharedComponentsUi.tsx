@@ -134,7 +134,7 @@ async function run(): Promise<string[]> {
     click('[aria-label="歌曲排序方式"]')
     await settle()
     click('[role="menuitemradio"]:last-child')
-    check(sort === 'addedAt', 'Song sort options changed during consolidation')
+    check(sort === 'score', 'Song sort menu is missing the rating option')
     click('[aria-label="歌曲排序降序"]')
     check(direction === 'asc', 'Sort direction no longer toggles')
     Array.from(host.querySelectorAll('button')).find(button => button.textContent === '随机播放')!.click()

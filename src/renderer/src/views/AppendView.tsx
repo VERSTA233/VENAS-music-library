@@ -6,6 +6,7 @@ import Cover from '../components/Cover'
 import type { PlayerTrack } from '../stores/playerStore'
 import { useListPlayback } from '../hooks/useListPlayback'
 import RandomPlayButton from '../components/RandomPlayButton'
+import LibraryContent from '../components/LibraryContent'
 import { useNavStore } from '../stores/navStore'
 import { formatTime } from '../playbackHelpers'
 
@@ -17,6 +18,7 @@ export default function AppendView({ active = true }: { active?: boolean }): Rea
   const [importingNetease, setImportingNetease] = useState(false)
   const [neteaseResult, setNeteaseResult] = useState<NeteaseImportResult | null>(null)
   const [neteaseError, setNeteaseError] = useState<string | null>(null)
+  const [scanError, setScanError] = useState<string | null>(null)
   const { currentKey, hasTrack, playQueue, playRandomQueue } = useListPlayback()
   const { restoreSignal, clearRestoreSignal } = useNavStore()
 
@@ -40,8 +42,11 @@ export default function AppendView({ active = true }: { active?: boolean }): Rea
 
   async function refresh(): Promise<void> {
     setLoading(true)
+    setScanError(null)
     try {
       setEntries(await window.api.append.scan())
+    } catch (reason) {
+      setScanError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setLoading(false)
     }
@@ -93,8 +98,9 @@ export default function AppendView({ active = true }: { active?: boolean }): Rea
       </div>
 
       {neteaseError && <p className="px-4 pt-3 text-xs text-red-400">{neteaseError}</p>}
+      {scanError && <p role="alert" className="px-4 pt-3 text-xs text-red-400">{scanError}</p>}
 
-      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2">
+      <LibraryContent loading={loading && entries.length === 0} className="flex flex-col gap-0.5 px-3 py-2">
         {!loading && entries.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 py-20 text-center text-sm text-neutral-500"><Inbox size={28} strokeWidth={1.5} className="text-neutral-600" />Append 目录为空</div>
         ) : (
@@ -108,9 +114,8 @@ export default function AppendView({ active = true }: { active?: boolean }): Rea
                 event.preventDefault()
                 playQueue(entries.map(toTrack), index)
               }}
-              className={`library-row group flex min-h-16 items-center gap-3 rounded-xl px-3 py-2.5 cursor-default hover:bg-white/[0.06] ${
-                currentKey === `append-${entry.fileName}` ? 'bg-white/[0.11] ring-1 ring-white/[0.06]' : ''
-              }`}
+              className="library-row library-song-row group"
+              data-current={currentKey === `append-${entry.fileName}`}
             >
               <span className="w-7 shrink-0 text-center text-sm font-mono leading-none tabular-nums text-neutral-500">{index + 1}</span>
               <Cover
@@ -138,7 +143,7 @@ export default function AppendView({ active = true }: { active?: boolean }): Rea
             </div>
           ))
         )}
-      </div>
+      </LibraryContent>
 
       {ingestingEntry && (
         <IngestModal

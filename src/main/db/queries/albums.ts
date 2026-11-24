@@ -194,17 +194,10 @@ export function getAlbumSongs(db: Database.Database, albumId: number): AlbumSong
   const rows = db
     .prepare<
       [number],
-      {
-        id: number
-        title: string
-        length: number | null
-        file_name: string
-        add_time: string | null
-        disc_number: number | null
-        track_number: number | null
-      }
+      Omit<AlbumSongItem, 'artistNames'>
     >(
       `SELECT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name, si.add_time AS add_time,
+              si.last_heard_date, si.score,
               als.disc_number AS disc_number, als.track_number AS track_number
        FROM album_songs als JOIN songs s ON s.id = als.song_id
        LEFT JOIN song_info si ON si.song_id = s.id

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Pencil } from 'lucide-react'
-import type { AlbumListItem, AlbumListSort, AlbumRow, AlbumSongItem, SortDirection } from '../../../shared/types'
+import type { AlbumListItem, AlbumRow, AlbumSongItem } from '../../../shared/types'
 import { useListPlayback } from '../hooks/useListPlayback'
 import { toMusicPlayerTrack } from '../playerTracks'
 import SongList from '../components/SongList'
@@ -8,9 +8,11 @@ import SongListToolbarActions from '../components/SongListToolbarActions'
 import RandomPlayButton from '../components/RandomPlayButton'
 import BrowseToolbarActions from '../components/BrowseToolbarActions'
 import ListSortControl from '../components/ListSortControl'
+import LibraryContent from '../components/LibraryContent'
 import SongEditModal from '../components/SongEditModal'
 import Cover from '../components/Cover'
 import { useNavStore } from '../stores/navStore'
+import { useListSort } from '../stores/listSortStore'
 import { filterAlbums, filterSongs } from '../songSearch'
 import AlbumEditModal from '../components/AlbumEditModal'
 
@@ -22,8 +24,7 @@ export default function AlbumView(): React.JSX.Element {
   const [albums, setAlbums] = useState<AlbumListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [sort, setSort] = useState<AlbumListSort>('title')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+  const { sort, sortDirection, setSort, setSortDirection } = useListSort('albums')
   const [query, setQuery] = useState('')
   const { target, clearTarget, navigate, openRoot, requestReturn } = useNavStore()
 
@@ -64,11 +65,6 @@ export default function AlbumView(): React.JSX.Element {
     return [...filteredAlbums].sort((a, b) => multiplier * (a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) || a.id - b.id))
   }, [filteredAlbums, sort, sortDirection])
 
-  function handleSortChange(nextSort: AlbumListSort): void {
-    setSort(nextSort)
-    setSortDirection(nextSort === 'title' ? 'asc' : 'desc')
-  }
-
   if (selectedId !== null) {
     return <AlbumDetail albumId={selectedId} onBack={handleDetailBack} onDeleted={() => handleDetailDeleted(selectedId)} />
   }
@@ -82,16 +78,14 @@ export default function AlbumView(): React.JSX.Element {
           onQueryChange={setQuery}
           placeholder="搜索专辑、艺术家或厂牌"
           searchLabel="搜索专辑、艺术家或厂牌"
-          sortControl={<ListSortControl kind="album" value={sort} onChange={handleSortChange} direction={sortDirection} onDirectionChange={setSortDirection} />}
+          sortControl={<ListSortControl kind="album" value={sort} onChange={setSort} direction={sortDirection} onDirectionChange={setSortDirection} />}
           count={filteredAlbums.length}
           countUnit="张"
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
-          <div className="py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : visibleAlbums.length === 0 ? (
+      <LibraryContent loading={loading} layout="albums" className="p-6">
+        {visibleAlbums.length === 0 ? (
           <div className="py-8 text-center text-neutral-500 text-sm">{query ? '没有匹配的专辑' : '暂无专辑'}</div>
         ) : (
           <div className="grid gap-x-5 gap-y-7" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))' }}>
@@ -99,7 +93,7 @@ export default function AlbumView(): React.JSX.Element {
               <button
                 key={album.id}
                 onClick={() => navigate({ view: 'album', id: album.id })}
-                className="group flex flex-col gap-2.5 text-left transition-transform duration-150 ease-out active:scale-[0.98]"
+                className="library-card group flex flex-col gap-2.5 text-left"
               >
                 <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-white/[0.05] shadow-lg shadow-black/20 ring-1 ring-white/[0.06] transition duration-200 group-hover:ring-white/[0.18]">
                   <Cover
@@ -121,7 +115,7 @@ export default function AlbumView(): React.JSX.Element {
             ))}
           </div>
         )}
-      </div>
+      </LibraryContent>
     </div>
   )
 }
@@ -209,10 +203,8 @@ function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JS
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
-        {loading ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-sm">加载中...</div>
-        ) : filteredSongs.length === 0 ? (
+      <LibraryContent loading={loading} className="py-2">
+        {filteredSongs.length === 0 ? (
           <div className="px-4 py-8 text-center text-neutral-500 text-sm">该专辑暂无曲目</div>
         ) : (
           <SongList
@@ -233,7 +225,7 @@ function AlbumDetail({ albumId, onBack, onDeleted }: AlbumDetailProps): React.JS
             onEdit={(song) => setEditingSong(song)}
           />
         )}
-      </div>
+      </LibraryContent>
 
       {editingSong && (
         <SongEditModal

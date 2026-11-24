@@ -15,6 +15,112 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+:root {
+  --library-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  view-transition-name: none;
+}
+
+/* 快照仅覆盖主视图，侧栏与播放条保持实时；过渡层不截获任何点击。 */
+.library-main-view {
+  view-transition-name: library-main;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(library-main) {
+  animation-duration: 180ms;
+}
+
+::view-transition-old(library-main) {
+  animation: library-view-out 140ms ease-out both;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(library-main) {
+  animation: library-content-in 180ms var(--library-ease) both;
+  mix-blend-mode: normal;
+}
+
+@keyframes library-view-out {
+  to { opacity: 0; }
+}
+
+@keyframes library-content-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.library-content[data-loading='false'] {
+  animation: library-content-in 180ms var(--library-ease);
+}
+
+/* 封面独立解码完成后淡入，不对每行建立动画控制器。 */
+.library-cover-image {
+  animation: library-content-in 160ms ease-out;
+}
+
+.library-placeholder {
+  flex: none;
+  padding: 0.5rem 0.75rem;
+  pointer-events: none;
+}
+
+.library-content.px-3 > .library-placeholder-songs { padding-inline: 0; }
+
+.library-placeholder-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 4rem;
+  margin-bottom: 0.125rem;
+  padding: 0.625rem 3.5rem 0.625rem 3.25rem;
+}
+
+.library-placeholder-cover,
+.library-placeholder-copy span,
+.library-placeholder-time {
+  display: block;
+  border-radius: 0.25rem;
+  background: var(--palette-skeleton);
+}
+
+.library-placeholder-cover {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+}
+
+.library-placeholder-copy { flex: 1; min-width: 0; }
+.library-placeholder-copy span:first-child { width: min(45%, 15rem); height: 0.75rem; }
+.library-placeholder-copy span:last-child { width: min(30%, 10rem); height: 0.5rem; margin-top: 0.5rem; }
+.library-placeholder-time { width: 2.5rem; height: 0.625rem; }
+.library-placeholder-item:nth-child(3n + 2) .library-placeholder-copy { opacity: 0.65; }
+
+.library-placeholder-artists,
+.library-placeholder-albums {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 1.75rem 1.25rem;
+  padding: 0;
+}
+.library-placeholder-albums { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.library-placeholder-artists .library-placeholder-item,
+.library-placeholder-albums .library-placeholder-item { display: block; height: auto; padding: 0; }
+.library-placeholder-artists .library-placeholder-cover,
+.library-placeholder-albums .library-placeholder-cover { width: 100%; height: auto; aspect-ratio: 1; border-radius: 0.75rem; }
+.library-placeholder-artists .library-placeholder-cover { border-radius: 50%; }
+.library-placeholder-artists .library-placeholder-copy,
+.library-placeholder-albums .library-placeholder-copy { display: block; margin-top: 0.75rem; }
+.library-placeholder-artists .library-placeholder-copy span { margin-inline: auto; }
+.library-placeholder-artists .library-placeholder-time,
+.library-placeholder-albums .library-placeholder-time,
+.library-placeholder-tags .library-placeholder-cover { display: none; }
+.library-placeholder-tags { padding: 0; }
+.library-placeholder-tags .library-placeholder-item { padding: 1rem; height: 3.5rem; }
+
 /* 封面同时受宽度和可用高度约束，预留双行曲名、艺术家、专辑及原有间距。
    两列一起缩放，保持封面与右侧内容的顶底对齐；极矮窗口仍可滚动查看。 */
 @media (min-width: 768px) {
@@ -80,6 +186,22 @@ button {
   -webkit-app-region: drag;
 }
 
+.library-toolbar h1 { letter-spacing: -0.02em; }
+
+/* 搜索和排序使用相同的边界、底色、高度与悬浮反馈。 */
+.library-toolbar-control {
+  height: 2rem;
+  border: 1px solid var(--palette-control-border);
+  border-radius: 0.5rem;
+  background: var(--palette-control-surface);
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.library-toolbar-control:hover,
+.library-toolbar-control:focus-within {
+  border-color: color-mix(in srgb, var(--palette-white) 16%, transparent);
+  background: var(--palette-icon-hover);
+}
+
 /* 隐藏式原生标题栏下，顶栏空白处可拖动窗口；交互控件必须显式退出拖拽区。 */
 .window-drag-region {
   -webkit-app-region: drag;
@@ -103,11 +225,31 @@ button {
 }
 
 .library-row {
-  transition: background-color 160ms ease-out, transform 100ms ease-out;
+  transition: background-color 160ms ease-out;
 }
 
-.library-row:active {
-  transform: scale(0.995);
+.library-row:hover { background: var(--palette-row-hover); }
+.library-row[data-current='true'] { background: var(--palette-row-current); box-shadow: inset 0 0 0 1px var(--palette-control-surface); }
+.library-row:active { background: var(--palette-row-pressed); transition-duration: 60ms; }
+
+.library-song-row {
+  display: flex;
+  min-height: 4rem;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  cursor: default;
+}
+
+.library-card {
+  transition: transform 180ms var(--library-ease), color 160ms ease-out;
+}
+.library-card:active { transform: scale(0.98); transition-duration: 80ms; }
+
+@media (prefers-contrast: more) {
+  .library-toolbar-control { border-color: var(--palette-neutral-500); }
+  .library-row[data-current='true'] { box-shadow: inset 0 0 0 1px var(--palette-neutral-500); }
 }
 
 .library-icon-button {
@@ -118,17 +260,20 @@ button {
   justify-content: center;
   border-radius: 9999px;
   color: var(--palette-icon);
-  transition: background-color 160ms ease-out, color 160ms ease-out, transform 100ms ease-out;
+  transition: background-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out, transform 100ms ease-out;
 }
 
-.library-icon-button:hover {
+.library-icon-button:hover:not(:disabled) {
   background: var(--palette-icon-hover);
   color: var(--palette-white);
 }
 
-.library-icon-button:active {
+.library-icon-button:active:not(:disabled) {
   transform: scale(0.94);
+  transition-duration: 60ms;
 }
+
+.library-icon-button:disabled { cursor: default; }
 
 /* 弹窗提交与关闭使用共享状态色，避免被图标按钮的默认颜色覆盖。 */
 .library-icon-button.modal-confirm-button {
@@ -209,6 +354,15 @@ input:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .library-content,
+  .library-cover-image { animation: none !important; }
+  .library-card,
+  .library-icon-button { transition: none; }
+  .library-card:active,
+  .library-icon-button:active { transform: none; }
+  ::view-transition-group(library-main),
+  ::view-transition-old(library-main),
+  ::view-transition-new(library-main) { animation: none !important; }
   *,
   *::before,
   *::after {

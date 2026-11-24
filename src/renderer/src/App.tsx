@@ -15,7 +15,9 @@ import FullPlayer from './components/FullPlayer'
 import { usePlayerStore } from './stores/playerStore'
 import { useNavStore, type NavTarget, type ViewKey } from './stores/navStore'
 import { useLibraryStore } from './stores/libraryStore'
+import { useListSortStore } from './stores/listSortStore'
 import { dispatchCoverUpdate } from './coverUpdates'
+import { useMainViewTransition } from './hooks/useMainViewTransition'
 
 /*
  * 正在输入时（文本框/文本域/可编辑元素聚焦）不拦截空格，避免打字打出空格时被误判为播放/暂停快捷键。
@@ -46,6 +48,7 @@ export default function App(): React.JSX.Element {
   const navTarget = useNavStore((s) => s.target)
   const restoreSignal = useNavStore((s) => s.restoreSignal)
   const returnTo = useNavStore((s) => s.returnTo)
+  const transitionMainView = useMainViewTransition()
 
   useEffect(() => window.api.library.onCoverUpdated(dispatchCoverUpdate), [])
 
@@ -69,9 +72,13 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     let disposed = false
-    window.api.navigation.getSession()
-      .then((session) => {
+    Promise.all([
+      window.api.navigation.getSession(),
+      window.api.navigation.getListSortPreferences()
+    ])
+      .then(([session, preferences]) => {
         if (disposed) return
+        useListSortStore.setState({ preferences })
         setView(session.view)
         useNavStore.getState().restoreSession(session)
       })
@@ -183,9 +190,11 @@ export default function App(): React.JSX.Element {
   function handleSidebarNavigation(nextView: ViewKey): void {
     /* 侧边栏代表重新进入栏目：丢弃跨页返回栈及详情层级，并清空 Music 搜索。 */
     void useLibraryStore.getState().setQuery('')
-    useNavStore.getState().openRoot(nextView)
-    setView(nextView)
-    setViewEpoch((value) => value + 1)
+    transitionMainView(() => {
+      useNavStore.getState().openRoot(nextView)
+      setView(nextView)
+      setViewEpoch((value) => value + 1)
+    })
   }
 
   return (
@@ -218,7 +227,7 @@ export default function App(): React.JSX.Element {
             </div>
           </aside>
 
-          <main className="min-w-0 flex-1 bg-content">
+          <main className="library-main-view min-w-0 flex-1 bg-content">
             {(view === 'append' || returnTo?.view === 'append' || restoreSignal?.view === 'append') && (
               <div key={`append-${viewEpoch}`} className={view === 'append' ? 'h-full' : 'hidden'}>
                 <AppendView active={view === 'append'} />

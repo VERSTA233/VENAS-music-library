@@ -395,14 +395,15 @@ export function getArtistById(db: Database.Database, artistId: number): ArtistRo
   return row ?? null
 }
 
-/* 某艺术家（含 Featured/Composer 等角色）关联的全部曲目，按曲名排序，供 Artist 详情页展示 */
+/* 某艺术家及其别名关联的全部曲目；界面复用音乐库排序规则。 */
 export function getArtistSongs(db: Database.Database, artistId: number): SongListItem[] {
   const rows = db
     .prepare<
       [number],
-      { id: number; title: string; length: number | null; file_name: string; add_time: string | null }
+      Omit<SongListItem, 'artistNames'>
     >(
-      `SELECT DISTINCT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name, si.add_time AS add_time
+      `SELECT DISTINCT s.id AS id, s.title AS title, s.length AS length, s.file_name AS file_name, si.add_time AS add_time,
+              si.last_heard_date, si.score
        FROM song_artists sa JOIN songs s ON s.id = sa.song_id
        LEFT JOIN song_info si ON si.song_id = s.id
        WHERE sa.artist_id = ?
