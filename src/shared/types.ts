@@ -51,16 +51,6 @@ export interface PlaybackVolume {
   muted: boolean
 }
 
-export type RemoteCommand = 'play' | 'pause' | 'toggle' | 'next' | 'previous'
-
-export interface NowPlayingState {
-  title: string
-  artist: string
-  duration: number
-  position: number
-  playing: boolean
-}
-
 export type MacAudioBackend = 'avfoundation' | 'auhal'
 
 export interface AudioOutputSettings {

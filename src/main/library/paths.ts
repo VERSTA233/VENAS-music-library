@@ -15,7 +15,7 @@ export function libraryPaths(musicRoot: string, systemRoot: string) {
     dbFile: join(database, 'music.db'),
     backups: join(database, 'backups'),
     tools: join(system, 'tools'),
-    ncmdump: join(system, 'tools', 'ncmdump'),
+    ncmdump: join(system, 'tools', process.platform === 'win32' ? 'ncmdump.exe' : 'ncmdump'),
     assets,
     assetsArtistPictures: join(assets, 'artist_pictures'),
     assetsSongPictures: join(assets, 'song_pictures'),

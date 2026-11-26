@@ -32,8 +32,6 @@ import type {
   LabelAlbumGroup,
   PlaybackSession,
   PlaybackVolume,
-  NowPlayingState,
-  RemoteCommand,
   MacAudioBackend,
   AudioOutputSettings,
   AudioTagWriteProgress,
@@ -162,13 +160,6 @@ const api = {
     delete: (tagId: number): Promise<void> => ipcRenderer.invoke('tags:delete', tagId)
   },
   playback: {
-    updateNowPlaying: (state: NowPlayingState | null): void =>
-      ipcRenderer.send('playback:updateNowPlaying', state),
-    onRemoteCommand: (callback: (command: RemoteCommand) => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, command: RemoteCommand): void => callback(command)
-      ipcRenderer.on('playback:remoteCommand', listener)
-      return () => { ipcRenderer.removeListener('playback:remoteCommand', listener) }
-    },
     getAudioOutput: (): Promise<AudioOutputSettings> => ipcRenderer.invoke('playback:getAudioOutput'),
     setAudioOutput: (backend: MacAudioBackend): Promise<AudioOutputSettings> => ipcRenderer.invoke('playback:setAudioOutput', backend),
     getSystemSuspended: (): Promise<boolean> => ipcRenderer.invoke('playback:getSystemSuspended'),

@@ -3,7 +3,7 @@ import { rm, realpath } from 'node:fs/promises'
 import { LibraryMaintenance } from '../library/maintenance'
 import { inspectPlaybackFile, inspectPlaybackFormat } from '../library/playbackInfo'
 import type { AudioOutputRuntime } from '../audioOutput'
-import { execFile } from 'node:child_process'
+import { openDatabaseTerminal } from '../databaseTerminal'
 import { readFileSync, existsSync, unlinkSync } from 'node:fs'
 import { basename, join, relative, isAbsolute } from 'node:path'
 import { parseAudioMetadata as parseFile } from '../library/audioMetadata'
@@ -509,19 +509,7 @@ export function registerIpcHandlers(paths: LibraryPaths, audioOutputRuntime: Aud
   handle('library:cleanAlbumsWithoutSongs', (_e, ids: number[]) => cleanEmptyLibraryRecords(paths, getDatabase(), 'album', ids))
   handle('library:cleanArtistsWithoutSongs', (_e, ids: number[]) => cleanEmptyLibraryRecords(paths, getDatabase(), 'artist', ids))
 
-  handle('library:openDatabaseTerminal', () => {
-    if (process.platform !== 'darwin') throw new Error('数据库终端入口目前仅支持 macOS')
-    const shellQuotedPath = `'${paths.dbFile.replace(/'/g, "'\\''")}'`
-    const command = `sqlite3 ${shellQuotedPath}`
-    const appleScriptCommand = command.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-    return new Promise<void>((resolve, reject) => {
-      execFile(
-        'osascript',
-        ['-e', 'tell application "Terminal" to activate', '-e', `tell application "Terminal" to do script "${appleScriptCommand}"`],
-        (error) => (error ? reject(error) : resolve())
-      )
-    })
-  })
+  handle('library:openDatabaseTerminal', () => openDatabaseTerminal(paths))
 
   handle('library:pickMusicRoot', async (): Promise<MusicRootInspection | null> => {
     const result = await dialog.showOpenDialog({

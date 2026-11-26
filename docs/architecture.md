@@ -28,8 +28,6 @@ flowchart LR
   Protocol --> Files
   Main[main/index 启动与窗口] --> IPC
   Main --> Protocol
-  Main --> NowPlaying[main/nowPlaying 系统媒体控制]
-  NowPlaying <--> NativeMedia[src/native-media macOS 桥接]
   Shared[shared 类型/规则] -.-> Renderer
   Shared -.-> IPC
 ```
@@ -53,7 +51,6 @@ flowchart LR
 | `docs/architecture.md`                                       | 本架构图和源码职责索引。                              |
 | `resources/audio-tags/`                                      | 构建出的原生标签写入器、动态库及许可证；由构建脚本管理。              |
 | `resources/audio-inspect/`                                   | 构建出的精简 FFmpeg、源码/许可证与构建信息；由构建脚本管理。        |
-| `resources/native-media/`                                    | macOS Now Playing 原生模块，由本机构建脚本生成。         |
 | `node_modules/`、`out/`、`dist/`                               | 依赖、编译输出和安装包产物，不是业务源码。                     |
 
 ## `src/main/`：Electron 主进程
@@ -64,8 +61,7 @@ flowchart LR
 | `mediaProtocol.ts`               | 注册 `venas-media`，校验文件名、提供音频 MIME 与 HTTP Range/seek 响应。              |
 | `windowBroadcast.ts`             | 向所有存活窗口广播主进程状态事件。                                                   |
 | `audioOutput.ts`                 | 配置 macOS Chromium 音频输出后端及其运行状态。                                     |
-| `nowPlaying.ts`                  | 加载 macOS Now Playing 桥接，发布播放状态并接收系统媒体命令；其他平台不启用。                    |
-| `../native-media/venas_media.mm` | 对接 MPRemoteCommandCenter 与 MPNowPlayingInfoCenter，处理耳机/系统媒体控制及资源释放。 |
+| `databaseTerminal.ts`            | 打开数据库终端；Windows 使用 PowerShell 和 sqlite3.exe，macOS 使用 Terminal。 |
 | `settings.ts`                    | Electron 设置文件的读写与设置类型。                                              |
 | `ipc/index.ts`                   | 注册 Append、歌曲、艺术家、专辑、Tag、播放、导航和设置等 IPC 通道；编排长任务及事件。                  |
 
@@ -170,7 +166,7 @@ flowchart LR
 | `stores/libraryStore.ts`         | 音乐库列表、查询条件和缓存状态。                    |
 | `stores/navStore.ts`             | 视图导航、返回上下文和恢复信号。                    |
 | `stores/playerStore.ts`          | 队列、播放模式、进度和播放会话状态。                  |
-| `playback/AudioEngine.tsx`       | 管理音频输出生命周期、Now Playing 状态同步与系统媒体命令。 |
+| `playback/AudioEngine.tsx`       | 管理音频输出生命周期、音量保存、维护暂停与休眠恢复。 |
 | `playback/PlaybackEngine.ts`     | 音频播放、预加载、无缝切歌、休眠恢复与进度同步。            |
 | `playback/audioVisualization.ts` | 波形、频谱数据和可视化帧订阅。                     |
 | `playback/listeningProgress.ts`  | 累计真实聆听时间并排除暂停/拖动时间。                 |
@@ -240,7 +236,6 @@ flowchart LR
 | `audio-tag-writer.cpp`       | TagLib 原生写入器：处理 MP3/WAV/Ogg/M4A 标签。                            |
 | `build-audio-inspector.mjs`  | 下载、校验、编译并准备精简 FFmpeg。                                          |
 | `build-audio-tag-writer.mjs` | 构建并准备 TagLib 标签写入器及依赖。                                         |
-| `build-native-media.mjs`     | 在 macOS 编译、签名并缓存 Node-API 系统媒体控制模块。                            |
 | `test-node.mjs`              | 打包并隔离运行 Node/Electron 主进程测试套件。                                 |
 | `test-ui.mjs`                | 启动隔离 Electron 窗口执行渲染进程测试；`--audio` 复用应用音频输出配置，额外参数传给 Electron。 |
 

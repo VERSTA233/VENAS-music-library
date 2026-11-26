@@ -4,9 +4,12 @@ dist/
 release/
 resources/audio-tags/
 resources/audio-inspect/
-resources/native-media/
 *.tsbuildinfo
 .DS_Store
+
+# 本地项目资料不再纳入版本管理。
+/本地播放器搭建.md
+/tag.md
 
 # tsc 误输出的编译产物（源码目录下不应存在 .js/.d.ts，均由 electron-vite 构建到 out/）
 src/**/*.js

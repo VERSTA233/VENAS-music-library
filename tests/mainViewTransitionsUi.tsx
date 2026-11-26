@@ -44,9 +44,9 @@ async function run(): Promise<string[]> {
     navigation: { getSession: async () => ({ view: 'music', target: null }), saveSession: async () => {}, getListSortPreferences: async () => defaultListSortPreferences, setListSortPreference: async () => {} },
     library: { onCoverUpdated: () => () => {}, onMaintenanceChange: () => () => {}, getMaintenanceState: async () => null },
     playback: {
-      onRemoteCommand: () => () => {}, onSystemSuspended: () => () => {}, getSystemSuspended: async () => false,
+      onSystemSuspended: () => () => {}, getSystemSuspended: async () => false,
       getGapless: async () => true, getVolume: async () => ({ volume: 1, muted: false }), setVolume: async () => {},
-      lastHeardDates: async () => [], updateNowPlaying: () => {}, getSession: async () => null, saveSession: async () => {}
+      lastHeardDates: async () => [], getSession: async () => null, saveSession: async () => {}
     },
     songs: { list: () => { songRequests++; return new Promise(resolve => { releaseSongs = () => resolve({ items: songs, total: songs.length }) }) }, cover: async () => null, mediaUrl: file => `mock://${file}` },
     append: { scan: () => { scans++; return new Promise(resolve => { releaseAppend = () => resolve([entry]) }) }, cover: async () => null, parseArtists: async () => ({ artists: [], cleanedTitle: 'Draft song' }) },

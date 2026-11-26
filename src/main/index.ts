@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, powerMonitor, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { settings } from './settings'
@@ -12,15 +12,11 @@ import type { LibraryPaths } from './library/paths'
 import { configureAudioOutput } from './audioOutput'
 import { broadcastToWindows } from './windowBroadcast'
 import { registerMediaProtocol, registerMediaScheme } from './mediaProtocol'
-import { startNowPlaying } from './nowPlaying'
-import type { NowPlayingState } from '../shared/types'
 
 // Chromium 特性必须在 app ready / 音频服务启动前设置。
 const audioOutputRuntime = configureAudioOutput(app.commandLine, process.platform, settings.get('macAudioBackend'))
 
 let libraryPaths: LibraryPaths | null = null
-let mainWindow: BrowserWindow | null = null
-let nowPlaying: ReturnType<typeof startNowPlaying> | null = null
 
 registerMediaScheme()
 
@@ -30,8 +26,8 @@ function createWindow(): void {
     height: 800,
     show: false,
     autoHideMenuBar: true,
-    /* 让 Web 内容延伸到交通灯区域，标题栏与侧栏/内容区使用同一套深色材质。 */
-    titleBarStyle: 'hiddenInset',
+    /* Windows 保留系统标题栏：窗口按钮和贴靠由系统处理，不会被页面或弹窗覆盖。 */
+    titleBarStyle: process.platform === 'win32' ? 'default' : 'hiddenInset',
     backgroundColor: colors.app,
     webPreferences: {
       /* package.json 为 "type": "module"，electron-vite 会把 preload 输出为 .mjs，扩展名必须对上 */
@@ -40,12 +36,6 @@ function createWindow(): void {
       /* 最小化后仍需及时准备后续曲目并同步播放队列。 */
       backgroundThrottling: false
     }
-  })
-  mainWindow = window
-  window.webContents.on('did-start-loading', () => nowPlaying?.update(null))
-  window.on('closed', () => {
-    nowPlaying?.update(null)
-    if (mainWindow === window) mainWindow = null
   })
 
   window.on('ready-to-show', () => {
@@ -91,16 +81,7 @@ async function ensureLibraryRoot(): Promise<{ musicRoot: string; systemRoot: str
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.venas.app')
-  nowPlaying = startNowPlaying((command) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('playback:remoteCommand', command)
-  })
-  ipcMain.on('playback:updateNowPlaying', (event, state: NowPlayingState | null) => {
-    if (BrowserWindow.fromWebContents(event.sender) !== mainWindow) return
-    if (state === null) { nowPlaying?.update(null); return }
-    if (!state || typeof state.title !== 'string' || typeof state.artist !== 'string'
-      || typeof state.playing !== 'boolean' || !Number.isFinite(state.duration) || !Number.isFinite(state.position)) return
-    nowPlaying?.update(state)
-  })
+  if (process.platform === 'win32') nativeTheme.themeSource = 'dark'
 
   let systemSuspended = false
   const publishPowerState = (suspended: boolean): void => {
@@ -140,5 +121,3 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
-
-app.on('will-quit', () => nowPlaying?.dispose())

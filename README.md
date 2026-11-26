@@ -65,7 +65,7 @@
     │   └── song_pictures/
     │       └── <歌曲ID>.jpg           # 无专辑歌曲的独立封面缓存
     └── tools/                        # 用户另行放入的工具
-        └── ncmdump                  # 如 NCM 解码工具
+        └── ncmdump.exe              # Windows NCM 解码工具；macOS 为 ncmdump。可同目录放置 sqlite3.exe
 ```
 
 目录和数据库会自动创建。例如，音乐目录和系统目录都选择 `/Users/你的用户名/Music/VENAS` 时，实际数据库路径为：

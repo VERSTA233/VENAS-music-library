@@ -10,6 +10,7 @@ import electron from 'electron'
 const inspector = resolve('resources/audio-inspect', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
 const writer = resolve('resources/audio-tags', process.platform === 'win32' ? 'venas-tag-writer.exe' : 'venas-tag-writer')
 const suites = {
+  'windows-support': [{ entry: 'tests/windowsSupport.test.ts', node: true }],
   covers: [{ entry: 'tests/coverUpdates.test.ts' }],
   thumbnails: [{ entry: 'tests/thumbnailCache.test.ts', node: true }],
   'tag-ordering': [{ entry: 'tests/tagOrdering.test.ts', node: true }],

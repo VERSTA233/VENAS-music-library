@@ -107,7 +107,7 @@ export async function importNeteaseMusic(paths: LibraryPaths, sourceDirectory: s
   if (!sourceDirectory) throw new Error('请先在设置中选择网易云音乐目录')
   if (!existsSync(sourceDirectory)) throw new Error('网易云音乐目录不存在，请在设置中重新选择')
   if (!statSync(sourceDirectory).isDirectory()) throw new Error('网易云音乐路径不是文件夹，请在设置中重新选择')
-  if (!existsSync(paths.ncmdump)) throw new Error('找不到 .system/tools/ncmdump 解码工具')
+  if (!existsSync(paths.ncmdump)) throw new Error(`找不到解码工具：${paths.ncmdump}`)
 
   const sourceFiles = rootFiles(sourceDirectory)
   const result: NeteaseImportResult = { audioFiles: [], missingCoverFiles: [], failedFiles: [] }
@@ -117,7 +117,7 @@ export async function importNeteaseMusic(paths: LibraryPaths, sourceDirectory: s
   for (const source of sourceFiles.filter((file) => extname(file.name).toLowerCase() === '.ncm')) {
     const temporaryDirectory = mkdtempSync(join(paths.tools, '.ncmdump-'))
     try {
-      await execFileAsync(paths.ncmdump, ['--output', temporaryDirectory, decodeSource(source, sourceDirectory, temporaryDirectory)])
+      await execFileAsync(paths.ncmdump, ['--output', temporaryDirectory, decodeSource(source, sourceDirectory, temporaryDirectory)], { windowsHide: true })
       const decodedPath = findDecodedAudio(temporaryDirectory)
       if (!decodedPath) throw new Error('解码工具没有生成唯一的 MP3 或 FLAC 文件')
       await prepareForAppend(decodedPath)
