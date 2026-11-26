@@ -12,6 +12,8 @@ import IngestModal from './IngestModal'
 import PlaybackControls from './PlaybackControls'
 import QueuePanel from './QueuePanel'
 import PlaybackProgress from './PlaybackProgress'
+import PlaybackFade from './PlaybackFade'
+import VolumeControl from './VolumeControl'
 
 interface FullPlayerProps {
   open: boolean
@@ -23,7 +25,8 @@ interface FullPlayerProps {
 export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProps): React.JSX.Element {
   const { queue, currentIndex, isPlaying, isAdvancing, togglePlay, playNext, playPrev, playAt, playbackMode, setPlaybackMode, currentTime, duration, requestSeek } = usePlayerStore()
   const currentTrack = currentIndex == null ? null : queue[currentIndex] ?? null
-  const [detail, setDetail] = useState<SongDetail | null>(null)
+  const [loadedDetail, setDetail] = useState<SongDetail | null>(null)
+  const detail = loadedDetail?.id === currentTrack?.songId ? loadedDetail : null
   const [playlistOpen, setPlaylistOpen] = useState(false)
   const [editingSongId, setEditingSongId] = useState<number | null>(null)
   const [ingestingEntry, setIngestingEntry] = useState<AppendEntry | null>(null)
@@ -36,7 +39,7 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
     }
     window.api.songs.detail(currentTrack.songId).then((song) => {
       if (!cancelled) setDetail(song)
-    })
+    }).catch(() => { if (!cancelled) setDetail(null) })
     return () => {
       cancelled = true
     }
@@ -48,6 +51,8 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
   const mood = currentTags?.filter((tag) => tag.tag_type?.toLowerCase() === 'mood')
   const appendAlbum = currentTrack?.appendEntry?.album
   const artistText = detail?.artists.map((artist) => artist.name).join(' / ') ?? currentTrack?.artistNames ?? ''
+  const contentKey = JSON.stringify([currentTrack?.key, currentTrack?.contentVersion])
+  const metadataKey = JSON.stringify([contentKey, currentTrack?.title, artistText, detail?.artists, detail?.album?.id, detail?.album?.title, appendAlbum])
 
   function closeAndNavigate(target: Parameters<FullPlayerProps['onNavigate']>[0]): void {
     onNavigate(target)
@@ -84,8 +89,10 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
             <div className="full-player-content min-h-0 flex-1 overflow-y-auto px-8 pb-5 md:px-16 lg:px-24">
               <div className="full-player-columns grid w-full grid-cols-1 content-start gap-y-5 md:mx-auto md:grid-cols-2 md:gap-x-10 md:gap-y-0">
                 <div className="order-1 min-w-0 md:-translate-x-5">
-                  <PlaybackCover track={currentTrack} className="aspect-square w-full rounded-xl object-cover shadow-2xl shadow-black/40" />
-                  <div className="flex min-w-0 flex-col gap-1 pt-5">
+                  <PlaybackFade contentKey={contentKey} className="aspect-square w-full rounded-xl shadow-2xl shadow-black/40">
+                    <PlaybackCover track={currentTrack} fadeIn className="h-full w-full rounded-xl object-cover" />
+                  </PlaybackFade>
+                  <PlaybackFade contentKey={metadataKey} className="flex min-w-0 flex-col gap-1 pt-5">
                     <TruncatedText text={currentTrack.title} lines={2} revealDelay={1500} className="text-2xl font-semibold leading-tight" />
                     <div className="relative top-[2px]">
                       {detail ? (
@@ -107,9 +114,9 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
                     ) : appendAlbum ? (
                       <HoverMarqueeText text={appendAlbum} className="text-sm leading-6 text-neutral-500" />
                     ) : null}
-                  </div>
+                  </PlaybackFade>
                 </div>
-                <aside className="relative order-2 min-h-[280px] overflow-hidden md:min-h-0 md:translate-x-5">
+                <aside className={`relative order-2 min-h-[280px] overflow-hidden md:min-h-0 md:translate-x-5${lyric?.trim() ? '' : ' full-player-visualization-slot'}`}>
                   <div className="absolute inset-0">
                     {lyric?.trim() ? (
                       <SyncedLyrics lyric={lyric} currentTime={currentTime} isPlaying={isPlaying} onSeek={requestSeek} />
@@ -132,7 +139,12 @@ export default function FullPlayer({ open, onClose, onNavigate }: FullPlayerProp
                   duration={duration}
                   isPlaying={isPlaying && isAdvancing}
                   onSeek={requestSeek}
-                  trailing={<button type="button" onClick={openTrackDetail} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition active:scale-95 hover:bg-white/10 hover:text-white" title="歌曲信息 / 添加到音乐库" aria-label="歌曲信息 / 添加到音乐库"><MoreHorizontal size={20} /></button>}
+                  trailing={
+                    <div className="flex shrink-0 items-center gap-3">
+                      <VolumeControl />
+                      <button type="button" onClick={openTrackDetail} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition active:scale-95 hover:bg-white/10 hover:text-white" title="歌曲信息 / 添加到音乐库" aria-label="歌曲信息 / 添加到音乐库"><MoreHorizontal size={20} /></button>
+                    </div>
+                  }
                 />
               </div>
             </footer>

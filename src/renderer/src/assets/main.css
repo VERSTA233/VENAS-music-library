@@ -121,6 +121,21 @@ button {
 .library-placeholder-tags { padding: 0; }
 .library-placeholder-tags .library-placeholder-item { padding: 1rem; height: 3.5rem; }
 
+.playback-cover-fade {
+  opacity: 0;
+  transition: opacity 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.playback-cover-fade[data-loaded='true'] { opacity: 1; }
+
+@starting-style {
+  .playback-cover-fade[data-loaded='true'] { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playback-cover-fade { transition-duration: 100ms; }
+}
+
 /* 封面同时受宽度和可用高度约束，预留双行曲名、艺术家、专辑及原有间距。
    两列一起缩放，保持封面与右侧内容的顶底对齐；极矮窗口仍可滚动查看。 */
 @media (min-width: 768px) {
@@ -132,6 +147,18 @@ button {
   .full-player-columns {
     /* 两列各预留 136px 文字高度，加回 40px 列间距：2 × 136 − 40 = 232。 */
     width: min(100%, 880px, max(280px, calc(200cqh - 232px)));
+  }
+
+  /* 可视化独立于实际标题行数及专辑是否存在；固定到双行标题的信息区底部。
+     20px 顶距 + 60px 双行标题 + 8px 两处间距 + 48px 艺术家/专辑。 */
+  .full-player-visualization-slot {
+    align-self: start;
+  }
+
+  .full-player-visualization-slot::before {
+    content: '';
+    display: block;
+    padding-top: calc(100% + 8.5rem);
   }
 }
 

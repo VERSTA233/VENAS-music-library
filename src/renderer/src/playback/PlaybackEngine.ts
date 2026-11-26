@@ -135,7 +135,7 @@ export class PlaybackEngine {
           waveform[bin] = Math.max(0, waveform[bin], peak)
         }
       }
-      return { trackKey: this.selected.key, sampleRate: context.sampleRate, fftSize: this.analyser.fftSize,
+      return { trackKey: this.selected.key, contentVersion: this.selected.contentVersion, sampleRate: context.sampleRate, fftSize: this.analyser.fftSize,
         frequencies: this.analysisFrequencies, samples: this.analysisSamples, waveform, waveformComplete: this.active != null }
     } catch {
       /* 可视化不可用时保留原有播放，不把装饰层的错误变成播放错误。 */

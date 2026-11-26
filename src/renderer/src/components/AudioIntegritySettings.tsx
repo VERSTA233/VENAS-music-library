@@ -28,7 +28,7 @@ const IntegrityIssues = memo(function IntegrityIssues({ issues, busy, completed 
         <p className="mt-1 whitespace-pre-wrap break-all text-neutral-400">{issue.message}</p>
       </li>)}
     </ul> : <p className="mt-3 text-xs text-neutral-500">{busy ? '暂未发现问题' : completed ? '未发现解码问题' : '暂无已记录的问题'}</p>}
-    {issues.length > 0 && <p className="mt-2 text-xs leading-5 text-neutral-500">只展示本次检查有诊断或未能完成检查的歌曲；下次检查会重试这些文件。解码警告不一定代表声音已受损。</p>}
+    {issues.length > 0 && <p className="mt-2 text-xs leading-5 text-neutral-500">只展示本次检查有问题或未能完成检查的歌曲；下次检查会重试这些文件。</p>}
   </>
 })
 

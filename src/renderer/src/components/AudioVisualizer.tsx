@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { animate } from 'motion/react'
 import type { PlaybackAudioFormat, TagRow } from '../../../shared/types'
 import { colors } from '../../../shared/colors'
 import { observeAudioVisualization, readAudioVisualization, spectrumLevels, SPECTRUM_MAX_HZ, SPECTRUM_MIN_HZ, type AudioVisualizationFrame } from '../playback/audioVisualization'
+import PlaybackFade from './PlaybackFade'
 
 interface AudioVisualizerProps {
   trackKey: string
@@ -22,11 +24,12 @@ interface AudioVisualizerProps {
 export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.Element {
   const spectrumRef = useRef<HTMLCanvasElement>(null)
   const waveformRef = useRef<HTMLCanvasElement>(null)
-  const dynamicRef = useRef<HTMLSpanElement>(null)
-  const levelRef = useRef<HTMLSpanElement>(null)
+  const [metrics, setMetrics] = useState({ key: '', dynamic: '—', level: '—' })
   const [fileFormat, setFileFormat] = useState<{ key: string; format: PlaybackAudioFormat } | null>(null)
   const formatKey = JSON.stringify([props.trackKey, props.mediaUrl, props.contentVersion])
   const format = fileFormat?.key === formatKey ? fileFormat.format : null
+  const contentKey = JSON.stringify([props.trackKey, props.contentVersion])
+  const sampleRateKey = JSON.stringify([contentKey, format?.sampleRate])
   const propsRef = useRef(props)
   const redrawRef = useRef<() => void>(() => {})
   useLayoutEffect(() => { propsRef.current = props })
@@ -50,9 +53,61 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
     let animation = 0, previousDraw = 0, settleUntil = 0, previousMetrics = 0
     let release: (() => void) | null = null
     let data: AudioVisualizationFrame | null = null
+    let waveform: Float32Array<ArrayBuffer> | null = null
+    let waveformKey = props.trackKey, waveformVersion = props.contentVersion
+    let waveformScale = 0
+    let waveformPhase: 'waiting' | 'collapsing' | 'expanding' | 'ready' = 'waiting'
+    let waveformAnimation: ReturnType<typeof animate> | null = null
     const targets = new Float32Array(96), levels = new Float32Array(96), peaks = new Float32Array(96)
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
     const sizes = new Map<HTMLCanvasElement, { width: number; height: number }>()
+
+    function animateWaveform(target: 0 | 1): void {
+      waveformAnimation?.stop()
+      waveformPhase = target === 0 ? 'collapsing' : 'expanding'
+      /* 从屏幕当前高度开始，切换中再次切歌也不会跳回完整高度。 */
+      waveformAnimation = animate(waveformScale, target, {
+        type: 'spring', bounce: 0, duration: target === 0 ? 0.18 : 0.32,
+        onUpdate: value => { waveformScale = value },
+        onComplete: () => {
+          waveformScale = target
+          waveformPhase = target === 0 ? 'waiting' : 'ready'
+          if (target === 0) waveform = null
+          wake()
+        }
+      })
+    }
+
+    function updateWaveform(): void {
+      const state = propsRef.current
+      if (waveformKey !== state.trackKey || waveformVersion !== state.contentVersion) {
+        waveformKey = state.trackKey
+        waveformVersion = state.contentVersion
+        if (waveform && waveformScale > 0 && !reducedMotion.matches) animateWaveform(0)
+        else {
+          waveformAnimation?.stop()
+          waveform = null
+          waveformScale = 0
+          waveformPhase = 'waiting'
+        }
+      }
+      if (reducedMotion.matches && waveformPhase === 'collapsing') {
+        waveformAnimation?.stop()
+        waveform = null
+        waveformScale = 0
+        waveformPhase = 'waiting'
+      }
+      /* 流式波形只包含已采样片段（未知值为 -1），不等待不存在的整曲解码。 */
+      const available = data && (data.waveformComplete || data.waveform.some(value => value >= 0))
+      if (waveformPhase !== 'collapsing' && available) {
+        waveform = data!.waveform
+        if (reducedMotion.matches) {
+          waveformAnimation?.stop()
+          waveformScale = 1
+          waveformPhase = 'ready'
+        } else if (waveformPhase === 'waiting') animateWaveform(1)
+      }
+    }
 
     function measure(canvas: HTMLCanvasElement): void {
       const { width, height } = canvas.getBoundingClientRect()
@@ -111,16 +166,16 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
       const center = height / 2
       wave!.fillStyle = colors['visualizer-grid']
       wave!.fillRect(0, center, width, 1)
-      if (data) {
+      if (waveform && waveformScale > 0) {
         const step = Math.max(1.5, width / 240)
         for (let x = 0; x < width; x += step) {
-          const first = Math.floor(x / width * data.waveform.length)
-          const end = Math.min(data.waveform.length, Math.max(first + 1, Math.ceil((x + step) / width * data.waveform.length)))
+          const first = Math.floor(x / width * waveform.length)
+          const end = Math.min(waveform.length, Math.max(first + 1, Math.ceil((x + step) / width * waveform.length)))
           let amplitude = -1
-          for (let bin = first; bin < end; bin++) amplitude = Math.max(amplitude, data.waveform[bin])
+          for (let bin = first; bin < end; bin++) amplitude = Math.max(amplitude, waveform[bin])
           if (amplitude < 0) continue
-          const barHeight = Math.max(1, Math.sqrt(amplitude) * (height - 8))
-          wave!.fillStyle = x / width <= progress ? colors['visualizer-waveform-played'] : colors['visualizer-waveform']
+          const barHeight = Math.max(1, Math.sqrt(amplitude) * (height - 8)) * waveformScale
+          wave!.fillStyle = waveformPhase !== 'collapsing' && x / width <= progress ? colors['visualizer-waveform-played'] : colors['visualizer-waveform']
           wave!.fillRect(x, center - barHeight / 2, Math.max(1, step - 0.7), barHeight)
         }
       }
@@ -138,8 +193,11 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
       const rms = data?.samples.length ? Math.sqrt(square / data.samples.length) : 0
       const decibels = (value: number): string => value > 0.000032 ? (20 * Math.log10(value)).toFixed(1) : '−∞'
       // 峰均比提供实时动态参考；静音时比值无定义，不显示虚假的动态值。
-      dynamicRef.current!.textContent = data && rms > 0.000032 ? (20 * Math.log10(peak / rms)).toFixed(1) : '—'
-      levelRef.current!.textContent = data ? decibels(rms) : '—'
+      const key = JSON.stringify([propsRef.current.trackKey, propsRef.current.contentVersion])
+      const dynamic = data && rms > 0.000032 ? (20 * Math.log10(peak / rms)).toFixed(1) : '—'
+      const level = data ? decibels(rms) : '—'
+      setMetrics(previous => previous.key === key && previous.dynamic === dynamic && previous.level === level
+        ? previous : { key, dynamic, level })
     }
 
     function draw(timestamp: number): void {
@@ -152,8 +210,9 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
         const elapsed = Math.min(0.1, Math.max(0.001, (timestamp - previousDraw) / 1000))
         previousDraw = timestamp
         const frame = readAudioVisualization()
-        if (frame?.trackKey === state.trackKey) data = frame
+        if (frame?.trackKey === state.trackKey && frame?.contentVersion === state.contentVersion) data = frame
         else data = null
+        updateWaveform()
         if (data && running) spectrumLevels(data.frequencies, data.sampleRate, data.fftSize, targets)
         else targets.fill(0)
         for (let index = 0; index < levels.length; index++) {
@@ -165,7 +224,7 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
         drawWaveform()
         updateMetrics(timestamp, running)
       }
-      if (running || timestamp < settleUntil) animation = requestAnimationFrame(draw)
+      if (running || waveformPhase === 'collapsing' || waveformPhase === 'expanding' || timestamp < settleUntil) animation = requestAnimationFrame(draw)
     }
 
     function wake(): void {
@@ -189,15 +248,16 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
     visibility()
     return () => {
       redrawRef.current = () => {}
+      waveformAnimation?.stop()
       cancelAnimationFrame(animation)
       resize.disconnect()
       document.removeEventListener('visibilitychange', visibility)
       reducedMotion.removeEventListener('change', wake)
       release?.()
     }
-  }, [props.active, props.trackKey, props.contentVersion])
+  }, [props.active])
 
-  useEffect(() => { redrawRef.current() }, [props.currentTime, props.duration, props.isPlaying, props.isAdvancing])
+  useEffect(() => { redrawRef.current() }, [props.trackKey, props.contentVersion, props.currentTime, props.duration, props.isPlaying, props.isAdvancing])
 
   const running = props.isPlaying && props.isAdvancing
   return (
@@ -206,21 +266,21 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
         {([['GENRE', props.genre], ['MOOD', props.mood]] as const).map(([label, tags]) => (
           <div key={label}>
             <span className="audio-visualizer-caption">{label}</span>
-            <span>
+            <PlaybackFade contentKey={JSON.stringify([contentKey, tags])} className="audio-visualizer-tag-value">
               {tags?.length ? tags.map((tag, index) => (
                 <span key={tag.id}>
                   {index > 0 && ' / '}
                   <button type="button" className="audio-visualizer-tag-link" aria-label={`查看标签 ${tag.name}`} onClick={() => props.onOpenTag(tag)}>{tag.name}</button>
                 </span>
               )) : '—'}
-            </span>
+            </PlaybackFade>
           </div>
         ))}
       </div>
       <header className="audio-visualizer-header">
         <span className="audio-visualizer-title">SPECTRUM</span>
         <span className="audio-visualizer-status" data-running={running}>
-          <i aria-hidden="true" />{running ? 'PLAYING' : props.isPlaying ? 'WAITING' : 'PAUSED'}
+          <i aria-hidden="true" />{running ? 'PLAYING' : props.isPlaying ? 'LOADING' : 'PAUSED'}
         </span>
       </header>
       <div className="audio-visualizer-spectrum"><canvas ref={spectrumRef} aria-label="实时对数频谱，横轴为频率，纵轴为分贝" /></div>
@@ -242,9 +302,24 @@ export default function AudioVisualizer(props: AudioVisualizerProps): React.JSX.
         </button>
       </div>
       <footer className="audio-visualizer-metrics">
-        <div><span className="audio-visualizer-caption">DYNAMIC</span><span><span ref={dynamicRef}>—</span><small>dB</small></span></div>
-        <div><span className="audio-visualizer-caption">LEVEL</span><span><span ref={levelRef}>—</span><small>dBFS</small></span></div>
-        <div><span className="audio-visualizer-caption">SAMPLE RATE</span><span><span>{format?.sampleRate ? (format.sampleRate / 1000).toFixed(1) : '—'}</span><small>kHz</small></span></div>
+        <div>
+          <span className="audio-visualizer-caption">DYNAMIC</span>
+          <PlaybackFade contentKey={contentKey} className="audio-visualizer-metric-value">
+            <span>{metrics.key === contentKey ? metrics.dynamic : '—'}</span><small>dB</small>
+          </PlaybackFade>
+        </div>
+        <div>
+          <span className="audio-visualizer-caption">LEVEL</span>
+          <PlaybackFade contentKey={contentKey} className="audio-visualizer-metric-value">
+            <span>{metrics.key === contentKey ? metrics.level : '—'}</span><small>dBFS</small>
+          </PlaybackFade>
+        </div>
+        <div>
+          <span className="audio-visualizer-caption">SAMPLE RATE</span>
+          <PlaybackFade contentKey={sampleRateKey} className="audio-visualizer-metric-value">
+            <span>{format?.sampleRate ? (format.sampleRate / 1000).toFixed(1) : '—'}</span><small>kHz</small>
+          </PlaybackFade>
+        </div>
       </footer>
     </section>
   )

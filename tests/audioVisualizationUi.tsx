@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import AudioVisualizer from '../src/renderer/src/components/AudioVisualizer'
 import { colors } from '../src/shared/colors'
 import '../src/renderer/src/assets/audio-visualizer.css'
-import { observeAudioVisualization, readAudioVisualization, registerAudioVisualization, spectrumLevels, waveformPeaks } from '../src/renderer/src/playback/audioVisualization'
+import { observeAudioVisualization, readAudioVisualization, registerAudioVisualization, spectrumLevels, waveformPeaks, type AudioVisualizationFrame } from '../src/renderer/src/playback/audioVisualization'
 
 function check(value: unknown, message: string): void { if (!value) throw new Error(message) }
 const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
@@ -27,10 +27,12 @@ async function run(): Promise<string[]> {
   let reads = 0, releases = 0
   const frequencies = Float32Array.from({ length: 4096 }, (_, index) => -38 - Math.log10(index + 1) * 8 + Math.sin(index * 0.07) * 5)
   const waveform = Float32Array.from({ length: 640 }, (_, index) => 0.15 + Math.abs(Math.sin(index * 0.11) * Math.cos(index * 0.034)) * 0.8)
+  let frame: AudioVisualizationFrame | null = { trackKey: 'test:1', sampleRate: 48000, fftSize: 8192, frequencies, samples: Float32Array.from({ length: 8192 }, (_, index) => index % 2 ? 0.5 : 0), waveform, waveformComplete: true }
+  const initialFrame = frame
   const unregister = registerAudioVisualization({
     read: () => {
       reads++
-      return { trackKey: 'test:1', sampleRate: 48000, fftSize: 8192, frequencies, samples: Float32Array.from({ length: 8192 }, (_, index) => index % 2 ? 0.5 : 0), waveform, waveformComplete: true }
+      return frame
     },
     release: () => { releases++ }
   })
@@ -91,15 +93,94 @@ async function run(): Promise<string[]> {
     check(metrics[0].textContent === 'DYNAMIC—dB', 'Silence displayed a misleading dynamic ratio')
     check(getComputedStyle(status).color !== getComputedStyle(heading).color, 'Paused status remained highlighted')
     check(formatRequests.length === 1, 'Pause or progress caused a repeated source format read')
+    flushSync(() => root.render(<AudioVisualizer {...props} isAdvancing={false} />))
+    check(host.innerText.includes('LOADING') && !host.innerText.includes('WAITING'), 'Loading status still uses WAITING')
+    const captions = Array.from(host.querySelectorAll('.audio-visualizer-tags .audio-visualizer-caption, .audio-visualizer-metrics .audio-visualizer-caption'))
+    const captionPositions = captions.map(caption => caption.getBoundingClientRect())
+    const checkCaptions = (): void => {
+      const current = host.querySelectorAll('.audio-visualizer-tags .audio-visualizer-caption, .audio-visualizer-metrics .audio-visualizer-caption')
+      check(current.length === 5, 'A visualization heading is missing')
+      captions.forEach((caption, index) => {
+        check(current[index] === caption, 'Track change replaced a static heading')
+        const rect = caption.getBoundingClientRect(), original = captionPositions[index]
+        check(Math.abs(rect.x - original.x) < 0.6 && Math.abs(rect.y - original.y) < 0.6, 'A static heading moved during the value transition')
+        for (let element: Element | null = caption; element && element !== host; element = element.parentElement) {
+          check(Number(getComputedStyle(element).opacity) === 1, 'A static heading participated in fading')
+        }
+      })
+    }
     flushSync(() => root.render(<AudioVisualizer {...props} trackKey="test:2" mediaUrl="venas-media://music/test2.flac" />))
-    check(metrics[2].textContent === 'SAMPLE RATE—kHz', 'Previous track sample rate flashed on the next track')
+    await delay(60)
+    checkCaptions()
+    for (const value of host.querySelectorAll('.audio-visualizer-metric-value, .audio-visualizer-tag-value')) {
+      check(Number(getComputedStyle(value).opacity) < 1, 'A visualization value did not fade out on a track change')
+    }
     flushSync(() => root.render(<AudioVisualizer {...props} trackKey="test:3" mediaUrl="venas-media://music/test3.mp3" />))
     formatRequests[2].resolve({ sampleRate: 48000 })
     await delay(50)
     formatRequests[1].resolve({ sampleRate: 96000 })
-    await delay(50)
-    check(metrics[2].textContent === 'SAMPLE RATE48.0kHz', 'Late metadata overwrote current track sample rate')
+    await delay(450)
+    checkCaptions()
+    check(host.querySelectorAll('.audio-visualizer-metrics > div')[2].textContent === 'SAMPLE RATE48.0kHz', 'Late metadata overwrote current track sample rate')
+    const settledMetrics = host.querySelector('.audio-visualizer-metric-value')!
+    flushSync(() => root.render(<AudioVisualizer {...props} trackKey="test:3" mediaUrl="venas-media://music/test3.mp3" currentTime={43} />))
+    await delay(100)
+    check(host.querySelector('.audio-visualizer-metric-value') === settledMetrics && Number(getComputedStyle(settledMetrics).opacity) === 1, 'Progress update restarted the metrics animation')
+    results.push('Genre, Mood, Dynamic, Level and Sample Rate headings stay opaque and stationary while only their values fade')
+
+    /* 检查实际 Canvas 像素：波形高度缩至中线后才采用新曲数据，游标仍可跳转。 */
+    const waveCanvas = waveformButton.querySelector('canvas')!
+    const waveHeight = (): number => {
+      const { width, height } = waveCanvas
+      const pixels = waveCanvas.getContext('2d')!.getImageData(0, 0, width, height).data
+      let min = height, max = 0
+      for (let x = Math.floor(width * 0.3); x < width * 0.7; x++) {
+        for (let y = 0; y < height; y++) {
+          if (pixels[(y * width + x) * 4 + 3] > 20) { min = Math.min(min, y); max = Math.max(max, y) }
+        }
+      }
+      return Math.max(0, max - min)
+    }
+    frame = { ...initialFrame, trackKey: 'wave:1', waveform: new Float32Array(640).fill(0.8) }
+    flushSync(() => root.render(<AudioVisualizer {...props} trackKey="wave:1" currentTime={0} />))
+    await delay(650)
+    const fullHeight = waveHeight()
+    check(fullHeight > 15, 'Ready waveform did not expand')
+    const releaseBeforeSwitch = releases
+    frame = null
+    flushSync(() => root.render(<AudioVisualizer {...props} trackKey="wave:2" currentTime={0} />))
+    await delay(85)
+    check(waveHeight() < fullHeight && waveHeight() > 0, 'Previous waveform did not visibly contract from its current height')
+    await delay(300)
+    check(waveHeight() === 0, 'Loading waveform did not settle at the center line')
+    frame = { ...initialFrame, trackKey: 'wave:1' }
+    await delay(100)
+    check(waveHeight() === 0, 'Late waveform from the previous song was displayed')
+    frame = { ...initialFrame, trackKey: 'wave:2', waveform: new Float32Array(640).fill(0.8) }
+    await delay(80)
+    check(waveHeight() > 0 && waveHeight() < fullHeight, 'New waveform did not expand gradually')
+    await delay(450)
+    check(waveHeight() >= fullHeight - 1 && releases === releaseBeforeSwitch, 'Track switch rebuilt the analysis subscription or failed to expand')
+    flushSync(() => root.render(<AudioVisualizer {...props} trackKey="wave:3" currentTime={0} />))
+    await delay(45)
+    flushSync(() => root.render(<AudioVisualizer {...props} trackKey="wave:4" currentTime={0} />))
+    frame = { ...initialFrame, trackKey: 'wave:3' }
+    await delay(400)
+    check(waveHeight() === 0, 'Rapid skipping revived an intermediate waveform')
+    const partial = new Float32Array(640).fill(-1)
+    partial.fill(0.8, 210, 240)
+    frame = { ...initialFrame, trackKey: 'wave:4', waveform: partial, waveformComplete: false }
+    await delay(550)
+    check(waveHeight() > 15, 'Streaming waveform waited forever for a full-file decode')
+    flushSync(() => root.render(<AudioVisualizer {...props} trackKey="wave:4" contentVersion="replaced" currentTime={0} />))
+    await delay(350)
+    check(waveHeight() === 0, 'Replacing audio displayed the old content version')
+    frame = { ...frame, contentVersion: 'replaced' }
+    await delay(550)
+    check(waveHeight() > 15, 'Replacement audio did not reveal its new waveform')
+    results.push('Waveforms contract to center, wait for matching data, expand vertically, and ignore obsolete tracks/content versions; streaming fragments still render')
     flushSync(() => root.render(<AudioVisualizer {...props} genre={[]} mood={undefined} active={false} />))
+    await delay(400)
     check(!host.querySelector('.audio-visualizer-tag-link') && host.querySelector('.audio-visualizer-tags')!.textContent === 'GENRE—MOOD—', 'Empty metadata rendered navigable placeholders')
     const readsWhenClosed = reads
     await delay(150)

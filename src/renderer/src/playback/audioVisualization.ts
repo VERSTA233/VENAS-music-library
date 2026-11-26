@@ -1,6 +1,7 @@
 /* 可视化只旁路读取当前音源，不创建第二份播放或解码任务。 */
 export interface AudioVisualizationFrame {
   trackKey: string
+  contentVersion?: string
   sampleRate: number
   fftSize: number
   frequencies: Float32Array<ArrayBuffer>

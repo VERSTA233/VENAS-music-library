@@ -262,7 +262,7 @@ export function registerIpcHandlers(paths: LibraryPaths, audioOutputRuntime: Aud
   handle('songs:pickReloadFile', async () => {
     const result = await dialog.showOpenDialog({
       title: '选择用于重载的音频文件',
-      defaultPath: paths.music,
+      defaultPath: paths.append,
       filters: [{ name: '音频文件', extensions: ['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'ape'] }],
       properties: ['openFile']
     })
